@@ -473,9 +473,9 @@ export default function App() {
   // spectator mode; a saved host session still takes over once it hydrates.
   const [mode, setMode] = useState(() => (readJoinParam() ? "spectator" : null));
   const [joinPin, setJoinPin] = useState(readJoinParam); // code from the landing field or a shared link
-  const [wipe, setWipe] = useState(false); // checkered-flag screen wipe between landing and a role
-  const wipeTimers = useRef([]);
-  useEffect(() => () => wipeTimers.current.forEach(clearTimeout), []);
+  const [leaving, setLeaving] = useState(false); // landing cards easing out before a role screen
+  const leaveTimer = useRef(null);
+  useEffect(() => () => clearTimeout(leaveTimer.current), []);
 
   // A saved host game, if any, summarised for the landing screen's
   // "Continue your game" ticket.
@@ -495,21 +495,21 @@ export default function App() {
         }
       : null;
 
-  // Runs `swap` while the flag wipe fully covers the screen, so the page change
-  // happens "behind" it. Reduced motion: swap immediately, no wipe.
+  // Soft hand-off: the landing cards ease up and fade, then the role screen
+  // swaps in and its sections rise in one by one (ArriveOnce). No full-screen
+  // cover, so nothing flashes. Reduced motion: swap immediately.
   const transitionTo = (swap) => {
     if (prefersReducedMotion()) {
       swap();
       return;
     }
-    setWipe(true);
-    wipeTimers.current.push(
-      setTimeout(() => {
-        swap();
-        window.scrollTo(0, 0);
-      }, 270),
-      setTimeout(() => setWipe(false), 650)
-    );
+    setLeaving(true);
+    clearTimeout(leaveTimer.current);
+    leaveTimer.current = setTimeout(() => {
+      swap();
+      setLeaving(false);
+      window.scrollTo(0, 0);
+    }, 300);
   };
   const [showDraft, setShowDraft] = useState(false);
   // After a draft: each player's remaining un-raced racers, keyed by player label.
@@ -1619,19 +1619,36 @@ export default function App() {
           animation: lpRise 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) backwards,
                      lpTicketGlow 2.6s ease-in-out 1.4s infinite;
         }
-        @keyframes lpWipe {
-          0%   { transform: translateX(-105%); }
-          42%  { transform: translateX(0); }
-          58%  { transform: translateX(0); }
-          100% { transform: translateX(105%); }
-        }
-        .lp-wipe { animation: lpWipe 0.65s cubic-bezier(0.65, 0, 0.35, 1) both; }
         @keyframes lpStamp {
           0%   { opacity: 0; transform: translate(-50%, -50%) scale(2.4) rotate(-20deg); }
           55%  { opacity: 1; transform: translate(-50%, -50%) scale(0.9) rotate(-9deg); }
           100% { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(-11deg); }
         }
-        .lp-stamp { animation: lpStamp 0.28s cubic-bezier(0.2, 0.9, 0.3, 1) both; }
+        .lp-stamp { animation: lpStamp 0.2s cubic-bezier(0.2, 0.9, 0.3, 1) both; }
+        /* Ticket tear: the stub is its own piece of card. It swings down on
+           its right-hand corner, so the perforation opens into a wedge from the
+           left notch: a partial tear, still hanging on. Both pieces get their
+           own offset shadow while apart. */
+        @keyframes lpTear {
+          0%   { transform: none; }
+          70%  { transform: translateY(3px) rotate(-3.4deg); }
+          100% { transform: translateY(2px) rotate(-3deg); }
+        }
+        .lp-tearing { box-shadow: none !important; transition: none !important; }
+        .lp-tearing .lp-piece { box-shadow: 5px 5px 0px var(--ink); }
+        .lp-stub-tear { transform-origin: 100% 0; animation: lpTear 0.34s cubic-bezier(0.3, 0.8, 0.3, 1) forwards; }
+        @keyframes lpLeave {
+          to { opacity: 0; transform: translateY(-10px) scale(0.98); }
+        }
+        .lp-leave { animation: lpLeave 0.3s cubic-bezier(0.4, 0, 1, 1) forwards; pointer-events: none; }
+        @keyframes lpShake {
+          0%, 100% { transform: translateX(0); }
+          20% { transform: translateX(-7px); }
+          40% { transform: translateX(6px); }
+          60% { transform: translateX(-4px); }
+          80% { transform: translateX(2px); }
+        }
+        .lp-shake { animation: lpShake 0.35s ease-in-out; }
         @keyframes lpSquash {
           0%   { transform: scale(1); }
           40%  { transform: scale(0.965, 0.94) translateY(3px); }
@@ -1720,7 +1737,7 @@ export default function App() {
         }
         .rank-pop { animation: rankPop 0.3s ease-out both; }
         @media (prefers-reduced-motion: reduce) {
-          .rank-pop, .lp-wipe, .lp-stamp, .lp-squash, .lp-settle, .lp-arrive > * { animation: none !important; }
+          .rank-pop, .lp-stamp, .lp-squash, .lp-stub-tear, .lp-leave, .lp-shake, .lp-settle, .lp-arrive > * { animation: none !important; }
           .lp-title, .lp-rise, .lp-racer, .lp-hop, .lp-host-ticket { animation: none !important; }
           .lp-press { transition: none; }
           /* Motion off: keep colour/shadow feedback, drop movement and effects. */
@@ -1774,6 +1791,7 @@ export default function App() {
           <ModeChooser
             historyIndex={historyIndex}
             resume={resumeInfo}
+            leaving={leaving}
             onHost={() => transitionTo(() => setMode("host"))}
             onJoin={(pin) =>
               transitionTo(() => {
@@ -1940,7 +1958,6 @@ export default function App() {
         </ArriveOnce>
         )}
       </div>
-      {wipe && <FlagWipe />}
     </div>
   );
 }
@@ -1954,32 +1971,6 @@ function ArriveOnce({ children }) {
     return () => clearTimeout(t);
   }, []);
   return <div className={done ? "" : "lp-arrive"}>{children}</div>;
-}
-
-// Full-screen sweep that hides the page swap: a dark panel with checkered
-// leading/trailing edges slides across, holds while the page changes behind
-// it, then exits. Purely decorative (aria-hidden, no pointer events needed
-// beyond blocking stray taps for ~0.6s).
-function FlagWipe() {
-  const checker = {
-    width: 36,
-    background: "repeating-conic-gradient(#1A1408 0% 25%, #FFFCF5 0% 50%) 0 0 / 36px 36px",
-  };
-  return (
-    <div
-      aria-hidden="true"
-      className="lp-wipe fixed inset-0 flex"
-      style={{ zIndex: 60, background: "var(--ink)", willChange: "transform" }}
-    >
-      <div style={checker} />
-      <div className="flex-1 flex items-center justify-center">
-        <span className="font-display comic-title text-5xl" style={{ color: "#FFFCF5", transform: "rotate(-3deg)" }}>
-          Go!
-        </span>
-      </div>
-      <div style={checker} />
-    </div>
-  );
 }
 
 // First-time contextual help. One storage key holds every dismissal as a
@@ -2461,7 +2452,7 @@ function TicketNotches({ top }) {
   );
 }
 
-function ModeChooser({ onHost, onJoin, historyIndex = [], resume = null }) {
+function ModeChooser({ onHost, onJoin, historyIndex = [], resume = null, leaving = false }) {
   const [pin, setPin] = useState("");
   const [lastRace, setLastRace] = useState(null);
 
@@ -2493,12 +2484,27 @@ function ModeChooser({ onHost, onJoin, historyIndex = [], resume = null }) {
     ? new Date(lastRace.date).toLocaleDateString(undefined, { month: "short", day: "numeric" })
     : "";
 
-  // Tap feedback: haptic tick, the ticket squashes and a stamp slams on, then
-  // (after the stamp lands) the page transition runs. Reduced motion skips
-  // straight to the transition. A second tap while stamping is ignored.
+  // Tap feedback, in order: haptic tick + squash; on the host ticket a stamp
+  // slams on; then the stub starts tearing along the perforation (about 60%
+  // of the way, sagging on its untorn hinge); then the page transition runs
+  // and the flag wipe covers the half-torn ticket. Reduced motion skips
+  // straight to the transition. A second tap mid-animation is ignored.
   const [stamp, setStamp] = useState(null); // null | "host" | "join"
+  const [shake, setShake] = useState(false);
   const stampTimer = useRef(null);
-  useEffect(() => () => clearTimeout(stampTimer.current), []);
+  const shakeTimer = useRef(null);
+  useEffect(
+    () => () => {
+      clearTimeout(stampTimer.current);
+      clearTimeout(shakeTimer.current);
+    },
+    []
+  );
+  // Host: stamp lands (0–180ms), then the stub tears. Join: tear only.
+  const TEAR_DELAY = { host: 180, join: 0 };
+  const [tearing, setTearing] = useState(null);
+  const tearTimer = useRef(null);
+  useEffect(() => () => clearTimeout(tearTimer.current), []);
   const fire = (kind, go) => {
     if (stamp) return;
     buzz(15);
@@ -2507,11 +2513,25 @@ function ModeChooser({ onHost, onJoin, historyIndex = [], resume = null }) {
       return;
     }
     setStamp(kind);
-    stampTimer.current = setTimeout(go, 330);
+    tearTimer.current = setTimeout(() => {
+      setTearing(kind);
+      if (TEAR_DELAY[kind] > 0) buzz(8); // softer second tick as it rips
+    }, TEAR_DELAY[kind]);
+    // Hand off once the tear has mostly opened.
+    stampTimer.current = setTimeout(go, TEAR_DELAY[kind] + 260);
   };
 
   const submitJoin = (e) => {
     e.preventDefault();
+    if (pin.length < 4) {
+      // Incomplete code: the slip shakes instead of tearing.
+      buzz([10, 40, 10]);
+      setShake(false);
+      requestAnimationFrame(() => setShake(true));
+      clearTimeout(shakeTimer.current);
+      shakeTimer.current = setTimeout(() => setShake(false), 400);
+      return;
+    }
     fire("join", () => onJoin(pin));
   };
 
@@ -2520,9 +2540,9 @@ function ModeChooser({ onHost, onJoin, historyIndex = [], resume = null }) {
 
   const stampStyle = (color) => ({
     position: "absolute",
-    left: "50%",
-    top: "50%",
-    padding: "2px 16px",
+    left: "58%",
+    top: "40%",
+    padding: "0px 12px",
     borderRadius: 10,
     border: `4px solid ${color}`,
     color,
@@ -2534,7 +2554,7 @@ function ModeChooser({ onHost, onJoin, historyIndex = [], resume = null }) {
 
   return (
     // onTouchStart no-op: makes iOS Safari apply :active styles to taps.
-    <div className="max-w-md mx-auto" onTouchStart={() => {}}>
+    <div className={`max-w-md mx-auto ${leaving ? "lp-leave" : ""}`} onTouchStart={() => {}}>
       {historyIndex.length > 0 && lastRace?.winner && (
         <div
           className="lp-rise flex items-center justify-center gap-2 mb-4 mx-auto rounded-2xl px-4 py-2"
@@ -2570,23 +2590,27 @@ function ModeChooser({ onHost, onJoin, historyIndex = [], resume = null }) {
         onPointerLeave={tiltHandlers.onPointerLeave}
         className={`lp-rise lp-ticket lp-host-ticket relative block w-full text-left rounded-2xl mb-5 ${
           stamp === "host" ? "lp-squash" : ""
-        }`}
-        style={{
-          animationDelay: "0.7s",
-          background: "var(--paper2)",
-          border: "4px solid var(--ink)",
-        }}
+        } ${tearing === "host" ? "lp-tearing" : ""}`}
+        style={{ animationDelay: "0.7s", background: "transparent", border: "none", padding: 0 }}
       >
-        {/* Clip layer for the shine sweep and click ripples (stays inside the border) */}
-        <span aria-hidden="true" className="absolute inset-0 overflow-hidden rounded-xl pointer-events-none">
+        {/* Clip layer for the shine sweep and click ripples */}
+        <span
+          aria-hidden="true"
+          className="absolute inset-0 overflow-hidden rounded-2xl pointer-events-none"
+          style={{ zIndex: 3 }}
+        >
           <span className="lp-shine" />
           {hostRipples}
         </span>
         {stamp === "host" && (
-          <span className="lp-stamp font-display text-3xl" style={stampStyle("var(--red)")} aria-hidden="true">
+          <span className="lp-stamp font-display text-2xl" style={stampStyle("var(--red)")} aria-hidden="true">
             {resume ? "Welcome back!" : "Let's race!"}
           </span>
         )}
+        <div
+          className="lp-piece rounded-t-2xl"
+          style={{ background: "var(--paper2)", border: "4px solid var(--ink)", borderBottom: "none" }}
+        >
         <div
           className="rounded-t-xl px-4 py-1.5 flex items-center justify-between"
           style={{ background: "var(--yellow)", borderBottom: "4px solid var(--ink)" }}
@@ -2616,10 +2640,18 @@ function ModeChooser({ onHost, onJoin, historyIndex = [], resume = null }) {
             </p>
           </div>
         </div>
-        <div className="relative" style={{ borderTop: "3px dashed var(--ink)" }}>
-          <TicketNotches top={0} />
         </div>
-        <div className="flex items-center justify-between px-4 py-3">
+        <div
+          className={`lp-piece relative rounded-b-2xl flex items-center justify-between px-4 py-3 ${
+            tearing === "host" ? "lp-stub-tear" : ""
+          }`}
+          style={{
+            background: "var(--paper2)",
+            border: "4px solid var(--ink)",
+            borderTop: "3px dashed var(--ink)",
+          }}
+        >
+          <TicketNotches top={-2} />
           <span className="font-mono text-xs" style={{ color: "var(--muted)" }}>
             {resume ? "Your game is saved" : "You run the race"}
           </span>
@@ -2641,18 +2673,15 @@ function ModeChooser({ onHost, onJoin, historyIndex = [], resume = null }) {
       {/* JOIN — betting slip with the code field right on it */}
       <form
         onSubmit={submitJoin}
-        className={`lp-rise lp-slip relative rounded-2xl ${stamp === "join" ? "lp-squash" : ""}`}
-        style={{
-          animationDelay: "0.85s",
-          background: "var(--paper2)",
-          border: "4px solid var(--ink)",
-        }}
+        className={`lp-rise lp-slip relative rounded-2xl ${stamp === "join" ? "lp-squash" : ""} ${
+          shake ? "lp-shake" : ""
+        } ${tearing === "join" ? "lp-tearing" : ""}`}
+        style={{ animationDelay: "0.85s" }}
       >
-        {stamp === "join" && (
-          <span className="lp-stamp font-display text-3xl" style={stampStyle("var(--purple)")} aria-hidden="true">
-            Good luck!
-          </span>
-        )}
+        <div
+          className="lp-piece rounded-t-2xl"
+          style={{ background: "var(--paper2)", border: "4px solid var(--ink)", borderBottom: "none" }}
+        >
         <div
           className="rounded-t-xl px-4 py-1.5 flex items-center justify-between"
           style={{ background: "var(--purple)", borderBottom: "4px solid var(--ink)" }}
@@ -2677,10 +2706,18 @@ function ModeChooser({ onHost, onJoin, historyIndex = [], resume = null }) {
             </p>
           </div>
         </div>
-        <div className="relative" style={{ borderTop: "3px dashed var(--ink)" }}>
-          <TicketNotches top={0} />
         </div>
-        <div className="flex items-stretch gap-2 px-4 py-3">
+        <div
+          className={`lp-piece relative rounded-b-2xl flex items-stretch gap-2 px-4 py-3 ${
+            tearing === "join" ? "lp-stub-tear" : ""
+          }`}
+          style={{
+            background: "var(--paper2)",
+            border: "4px solid var(--ink)",
+            borderTop: "3px dashed var(--ink)",
+          }}
+        >
+          <TicketNotches top={-2} />
           <input
             value={pin}
             onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
