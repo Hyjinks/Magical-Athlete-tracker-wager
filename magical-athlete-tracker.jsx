@@ -199,7 +199,37 @@ const emptyRacer = (i) => ({
   position: 0,
   finished: false,
   place: null,
+  tripped: false,
 });
+
+// Both boards run Start (space 0) to the finish line (space 30): 29 numbered
+// spaces in between. Mild Mile prints distance markers at 5/10/15/20/25.
+const STANDARD_TRACK_LENGTH = 30;
+
+// Wild Wilds effect spaces, numbered in the direction of travel (Start = 0).
+// Arrows move the racer that many spaces in the arrow's direction: positive is
+// toward the finish, negative is back toward Start. A racer that stops on one
+// gets a prompt (SpaceEffectPrompt) so nothing on the physical board is missed.
+//   star  — take a bronze 1 point chip
+//   trip  — skip the next main move
+//   arrow — a separate move, never part of the main move
+const WILD_WILDS_SPACES = {
+  1: { type: "star", chips: 1 },
+  5: { type: "trip" },
+  7: { type: "arrow", delta: 3 },
+  11: { type: "arrow", delta: 1 },
+  13: { type: "star", chips: 1 },
+  16: { type: "arrow", delta: -4 },
+  17: { type: "trip" },
+  23: { type: "arrow", delta: 2 },
+  24: { type: "arrow", delta: -2 },
+  26: { type: "trip" },
+};
+
+// The effect on a space for the chosen track, or null. Mild Mile and custom
+// tracks have none.
+const spaceEffectFor = (trackName, position) =>
+  trackName === "wild" ? WILD_WILDS_SPACES[position] || null : null;
 
 // ---- small browser helpers (all fail soft: a missing API never breaks a tap) ----
 
@@ -543,6 +573,9 @@ export default function App() {
   // turn began — drives the "Next turn" button's emphasis, so it's obvious
   // once you've moved that tapping it is what makes the game proceed.
   const [turnHasMoved, setTurnHasMoved] = useState(false);
+  // The track-space effect waiting for the table to resolve it:
+  // { id, racerId, pos, effect } | null. Never persisted — a refresh just drops it.
+  const [pendingEffect, setPendingEffect] = useState(null);
 
   // Manual override (tapping a racer row) — sets who's active AND treats it
   // as a fresh turn, same as advanceTurn.
@@ -662,7 +695,7 @@ export default function App() {
   };
 
   const [status, setStatus] = useState("setup"); // setup | racing | finished
-  const [trackLength, setTrackLength] = useState(20);
+  const [trackLength, setTrackLength] = useState(STANDARD_TRACK_LENGTH);
   const [trackName, setTrackName] = useState("mild"); // "mild" | "wild" | "custom"
   const [racers, setRacers] = useState([emptyRacer(0), emptyRacer(1)]);
 
@@ -733,13 +766,13 @@ export default function App() {
         if (Array.isArray(s.moveHistory)) setMoveHistory(s.moveHistory);
         if (s.odds && typeof s.odds === "object") setOdds(s.odds);
         if (typeof s.status === "string") setStatus(s.status);
-        // Standard track (20 spaces) unless Custom was explicitly chosen.
+        // Standard track (30 spaces) unless Custom was explicitly chosen.
         if (s.trackName === "custom" && typeof s.trackLength === "number") {
           setTrackName("custom");
           setTrackLength(s.trackLength);
         } else {
           setTrackName(s.trackName === "wild" ? "wild" : "mild");
-          setTrackLength(20);
+          setTrackLength(STANDARD_TRACK_LENGTH);
         }
         if (typeof s.savedThisRace === "boolean") setSavedThisRace(s.savedThisRace);
         if (typeof s.goldPoints === "string") setGoldPoints(s.goldPoints);
@@ -1012,7 +1045,8 @@ export default function App() {
 
   const startRace = () => {
     if (validRacers.length < 2) return;
-    setRacers(racers.map((r) => ({ ...r, position: 0, finished: false, place: null })));
+    setRacers(racers.map((r) => ({ ...r, position: 0, finished: false, place: null, tripped: false })));
+    setPendingEffect(null);
     setFinishOrder([]);
     setTurnLog([]);
     setMoveHistory([]);
@@ -1043,7 +1077,9 @@ export default function App() {
   // Advances to the next eligible (unfinished) racer, cycling through in
   // roster order. Used both by the explicit "Next turn" action and
   // automatically when the active racer's own move finishes the race.
-  const advanceTurn = () => {
+  // `clearedId` is a racer whose trip was only just resolved, so the stale
+  // `racers` snapshot here doesn't prompt for it a second time.
+  const advanceTurnFrom = (clearedId) => {
     setTurnHasMoved(false);
     const eligible = validRacers.filter((r) => !r.finished);
     if (eligible.length === 0) {
@@ -1052,8 +1088,15 @@ export default function App() {
     }
     const currentIdx = eligible.findIndex((r) => r.id === activeRacerId);
     const nextIdx = currentIdx === -1 ? 0 : (currentIdx + 1) % eligible.length;
-    setActiveRacerId(eligible[nextIdx].id);
+    const next = eligible[nextIdx];
+    setActiveRacerId(next.id);
+    // A tripped racer skips their next main move — prompt so the table
+    // remembers, and stands the token back up.
+    if (next.tripped && next.id !== clearedId) {
+      setPendingEffect({ id: uid(), racerId: next.id, pos: next.position, effect: { type: "tripSkip" } });
+    }
   };
+  const advanceTurn = () => advanceTurnFrom(null);
 
   const moveRacer = (id, delta) => {
     if (status !== "racing") return;
@@ -1081,6 +1124,16 @@ export default function App() {
       }
     }
 
+    // Stopping on a different space with an effect (Wild Wilds) raises a
+    // prompt. Moving 0 isn't moving, and the finish line has no effect. Star
+    // prompts are skipped when the table has turned bronze chips off.
+    if (!willFinish && newPos !== prevPosition) {
+      const landed = spaceEffectFor(trackName, newPos);
+      if (landed && !(landed.type === "star" && houseRules.bronzeEnabled === false)) {
+        setPendingEffect({ id: uid(), racerId: id, pos: newPos, effect: landed });
+      }
+    }
+
     // The active racer just finished and can't take another turn — hand the
     // turn to whoever's next, rather than leaving a finished racer marked
     // active. Skipped if the race just ended outright (nothing to hand off to).
@@ -1105,9 +1158,27 @@ export default function App() {
   const undoLastMove = () => {
     if (moveHistory.length === 0) return;
     const last = moveHistory[0];
+    setPendingEffect(null);
     setRacers((prev) =>
-      prev.map((r) => (r.id === last.racerId ? { ...r, position: last.prevPosition, finished: false } : r))
+      prev.map((r) =>
+        r.id === last.racerId
+          ? {
+              ...r,
+              position: last.prevPosition,
+              finished: false,
+              // Undoing the move that tripped them also undoes the trip.
+              tripped: last.trippedSet ? false : r.tripped,
+            }
+          : r
+      )
     );
+    // ...and a star chip that was tallied for that move.
+    if (last.chipPlayer) {
+      setBronzePoints((prev) => {
+        const left = Math.max(0, (parseFloat(prev[last.chipPlayer]) || 0) - last.chipCount);
+        return { ...prev, [last.chipPlayer]: left > 0 ? String(left) : "" };
+      });
+    }
     setFinishOrder(last.prevFinishOrder);
     if (last.racesJustEnded) {
       setStatus("racing");
@@ -1136,7 +1207,43 @@ export default function App() {
     moveRacer(id, pos - racer.position);
   };
 
+  // The table has dealt with the track-space prompt on the physical board.
+  const confirmEffect = () => {
+    const pending = pendingEffect;
+    if (!pending) return;
+    setPendingEffect(null);
+    const racer = racers.find((r) => r.id === pending.racerId);
+    if (!racer) return;
+    const { effect } = pending;
+    // Remember on the racer's latest move what this prompt changed, so Undo can reverse it.
+    const noteOnLastMove = (patch) =>
+      setMoveHistory((h) => (h.length && h[0].racerId === racer.id ? [{ ...h[0], ...patch }, ...h.slice(1)] : h));
+
+    if (effect.type === "arrow") {
+      // A separate move; if it lands on another effect space, moveRacer prompts again.
+      moveRacer(racer.id, effect.delta);
+    } else if (effect.type === "trip") {
+      setRacers((prev) => prev.map((r) => (r.id === racer.id ? { ...r, tripped: true } : r)));
+      noteOnLastMove({ trippedSet: true });
+    } else if (effect.type === "tripSkip") {
+      setRacers((prev) => prev.map((r) => (r.id === racer.id ? { ...r, tripped: false } : r)));
+      advanceTurnFrom(racer.id);
+    } else if (effect.type === "star") {
+      // The chip is also tallied for the racer's player, so the end-of-race
+      // bronze field is already filled in.
+      const player = (racer.player || "").trim();
+      if (player) {
+        setBronzePoints((prev) => ({ ...prev, [player]: String((parseFloat(prev[player]) || 0) + effect.chips) }));
+        noteOnLastMove({ chipPlayer: player, chipCount: effect.chips });
+      }
+    }
+  };
+
+  // Dismiss without applying: a mis-tapped space, or something already sorted out.
+  const dismissEffect = () => setPendingEffect(null);
+
   const endRaceNow = () => {
+    setPendingEffect(null);
     // Racers who genuinely crossed keep their places; any remaining podium
     // slot is filled by whoever is furthest along, so ending a race early
     // still awards 2nd place (and its silver chip).
@@ -1211,7 +1318,7 @@ export default function App() {
     if (trackName !== "custom") {
       const next = trackName === "wild" ? "mild" : "wild";
       setTrackName(next);
-      setTrackLength(20);
+      setTrackLength(STANDARD_TRACK_LENGTH);
       updateHouseRule("bronzeEnabled", next === "wild");
     }
   };
@@ -1883,6 +1990,18 @@ export default function App() {
         {mode === "host" && !showChampion && (
           <>
             <TabBar tab={tab} setTab={setTab} status={status} />
+
+            {status === "racing" && pendingEffect && racers.some((r) => r.id === pendingEffect.racerId) && (
+              <SpaceEffectPrompt
+                key={pendingEffect.id}
+                racer={racers.find((r) => r.id === pendingEffect.racerId)}
+                pos={pendingEffect.pos}
+                effect={pendingEffect.effect}
+                trackLength={trackLength}
+                onConfirm={confirmEffect}
+                onDismiss={dismissEffect}
+              />
+            )}
 
             {tab === "setup" && showDraft && (
               <DraftAssistant
@@ -4832,7 +4951,7 @@ function SetupTab({
         <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Track">
           {[
             ["mild", "Mild Mile", "Plain track"],
-            ["wild", "Wild Wilds", "Star spaces"],
+            ["wild", "Wild Wilds", "Star, arrow & trip"],
           ].map(([id, label, sub]) => {
             const on = trackName === id;
             return (
@@ -4844,7 +4963,7 @@ function SetupTab({
                 disabled={locked}
                 onClick={() => {
                   setTrackName(id);
-                  setTrackLength(20);
+                  setTrackLength(STANDARD_TRACK_LENGTH);
                   updateHouseRule("bronzeEnabled", id === "wild");
                 }}
                 className="rounded-lg px-3 py-2 text-left"
@@ -4856,7 +4975,7 @@ function SetupTab({
                 }}
               >
                 <span className="block text-sm font-bold">{label}</span>
-                <span className="block font-mono text-xs">20 spaces · {sub}</span>
+                <span className="block font-mono text-xs">{STANDARD_TRACK_LENGTH} spaces · {sub}</span>
               </button>
             );
           })}
@@ -4867,7 +4986,7 @@ function SetupTab({
           onClick={() => {
             if (trackName === "custom") {
               setTrackName("mild");
-              setTrackLength(20);
+              setTrackLength(STANDARD_TRACK_LENGTH);
               updateHouseRule("bronzeEnabled", false);
             } else setTrackName("custom");
           }}
@@ -5827,6 +5946,164 @@ function BettingTab(props) {
   );
 }
 
+// Full-screen prompt when a racer stops on a Wild Wilds effect space (or when a
+// tripped racer's turn comes round), so nothing printed on the physical board
+// gets skipped. The primary button applies the effect in the app; "Not this
+// space" closes it without changing anything, and Undo covers the move itself.
+function SpaceEffectPrompt({ racer, pos, effect, trackLength, onConfirm, onDismiss }) {
+  const primaryRef = useRef(null);
+  useEffect(() => {
+    buzz([40, 60, 40]);
+    if (primaryRef.current) primaryRef.current.focus();
+  }, []);
+
+  const player = (racer.player || "").trim();
+  let emoji = "⭐";
+  let title = "";
+  let header = "";
+  let color = "var(--yellow)";
+  let textColor = "var(--ink)";
+  let body = null;
+  let action = "Got it";
+
+  if (effect.type === "arrow") {
+    const steps = Math.abs(effect.delta);
+    const forward = effect.delta > 0;
+    const target = Math.max(0, Math.min(trackLength, pos + effect.delta));
+    emoji = forward ? "⏩" : "⏪";
+    title = `Arrow: ${forward ? "forward" : "back"} ${steps}`;
+    header = `Arrow space · ${pos}`;
+    color = "var(--purple)";
+    textColor = "#FFFCF5";
+    body = (
+      <>
+        Move {racer.name} <strong>{forward ? "forward" : "back"} {steps}</strong>{" "}
+        {steps === 1 ? "space" : "spaces"} to {target >= trackLength ? "the finish line" : `space ${target}`}.
+        This is a separate move, not part of the main move.
+      </>
+    );
+    action = `Move ${forward ? "forward" : "back"} ${steps}`;
+  } else if (effect.type === "trip") {
+    emoji = "🤕";
+    title = "Trip!";
+    header = `Trip space · ${pos}`;
+    color = "var(--red)";
+    textColor = "#FFFCF5";
+    body = (
+      <>
+        {racer.name} <strong>skips their next main move</strong> — no die roll. Their powers can still
+        trigger and they can still move in other ways. Finish this move first, then lay the token face down.
+      </>
+    );
+    action = "Got it — mark as tripped";
+  } else if (effect.type === "tripSkip") {
+    emoji = "🤕";
+    title = "Tripped: skip main move";
+    header = "Turn skipped";
+    color = "var(--red)";
+    textColor = "#FFFCF5";
+    body = (
+      <>
+        {racer.name} is tripped. <strong>Skip their main move</strong> — don't roll. Their powers can still
+        trigger. Stand their token back upright.
+      </>
+    );
+    action = "Done — next turn";
+  } else {
+    emoji = "⭐";
+    title = "Star space!";
+    header = `Star space · ${pos}`;
+    body = (
+      <>
+        {racer.name} stopped on a star. <strong>Take a bronze {effect.chips} point chip.</strong>
+        {player ? ` It's added to ${player}'s bronze tally.` : ""}
+      </>
+    );
+    action = "Got the chip";
+  }
+
+  return (
+    <div
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="space-effect-title"
+      className="fixed inset-0 z-50 flex items-center justify-center px-4"
+      style={{ background: "rgba(10,6,0,0.72)" }}
+    >
+      <div
+        className="lp-rise w-full rounded-2xl overflow-hidden"
+        style={{
+          maxWidth: 360,
+          background: "var(--paper2)",
+          border: "4px solid var(--ink)",
+          boxShadow: "6px 6px 0px var(--ink)",
+        }}
+      >
+        <div
+          className="px-4 py-1.5 flex items-center justify-between"
+          style={{ background: color, borderBottom: "4px solid var(--ink)" }}
+        >
+          <span className="font-mono text-xs font-semibold tracking-widest uppercase" style={{ color: textColor }}>
+            {header}
+          </span>
+          <span className="font-mono text-xs font-semibold" style={{ color: textColor }}>
+            Wild Wilds
+          </span>
+        </div>
+
+        <div className="px-6 pt-6 pb-3 text-center">
+          <span
+            className="mx-auto flex items-center justify-center rounded-full text-5xl"
+            style={{ width: 88, height: 88, background: "var(--highlight)", border: "3px solid var(--ink)" }}
+            aria-hidden="true"
+          >
+            {emoji}
+          </span>
+          <p id="space-effect-title" className="font-display text-2xl mt-3" style={{ color: "var(--ink)" }}>
+            {title}
+          </p>
+          <p className="flex items-center justify-center gap-1.5 text-xs mt-1" style={{ color: "var(--muted)" }}>
+            <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: racer.color }} />
+            <span className="font-medium" style={{ color: "var(--ink)" }}>{racer.name}</span>
+            {player && <span>· {player}</span>}
+          </p>
+          <p className="text-sm mt-3" style={{ color: "var(--ink)" }}>
+            {body}
+          </p>
+        </div>
+
+        <div className="px-4 pb-4">
+          <button
+            ref={primaryRef}
+            type="button"
+            onClick={onConfirm}
+            className="lp-press w-full inline-flex items-center justify-center gap-1 rounded-lg font-display text-base px-5"
+            style={{
+              minHeight: 52,
+              background: "var(--red)",
+              color: "var(--paper2)",
+              border: "3px solid var(--ink)",
+              boxShadow: "3px 3px 0px var(--ink)",
+            }}
+          >
+            {action}
+          </button>
+          {effect.type !== "tripSkip" && (
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="w-full mt-1 text-xs font-mono underline"
+              style={{ color: "var(--muted)", minHeight: 48 }}
+            >
+              Not this space — dismiss
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MoveControls({ racer, others, trackLength, moveRacer, setPositionDirect }) {
   const [goValue, setGoValue] = useState("");
 
@@ -6212,6 +6489,14 @@ function TrackTab({
                         style={{ background: "var(--red)", color: "var(--paper2)" }}
                       >
                         Their turn
+                      </span>
+                    )}
+                    {r.tripped && !r.finished && (
+                      <span
+                        className="font-mono text-xs px-1.5 py-0.5 rounded shrink-0"
+                        style={{ background: "var(--ink)", color: "var(--paper2)" }}
+                      >
+                        Tripped
                       </span>
                     )}
                     {r.finished && (
