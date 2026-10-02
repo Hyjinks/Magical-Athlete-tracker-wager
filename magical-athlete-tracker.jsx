@@ -1695,6 +1695,15 @@ export default function App() {
           100% { opacity: 1; transform: scale(1) rotate(-2deg); }
         }
         .lp-settle { animation: lpSettle 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) backwards; }
+        /* Idle sparkle on the wordmark: four small stars around the title
+           twinkle one at a time. Each star is invisible for most of its cycle
+           and the cycles are offset, so the logo is mostly still. */
+        @keyframes maSparkle {
+          0%, 68%, 100% { opacity: 0; transform: scale(0) rotate(0deg); }
+          78%           { opacity: 1; transform: scale(1.15) rotate(40deg); }
+          90%           { opacity: 0.9; transform: scale(0.7) rotate(80deg); }
+        }
+        .ma-sparkle { position: absolute; pointer-events: none; opacity: 0; animation: maSparkle 5s ease-in-out infinite; }
         .lp-press { transition: transform 0.12s ease, box-shadow 0.12s ease; }
         .lp-press:active { transform: translate(3px, 3px) scale(0.99); box-shadow: 2px 2px 0px var(--ink) !important; }
         /* ---- Interactive landing cards ----
@@ -1764,6 +1773,7 @@ export default function App() {
           .rank-pop, .lp-stamp, .lp-squash, .lp-stub-tear, .lp-leave, .lp-shake, .lp-settle, .lp-arrive > * { animation: none !important; }
           .dice-shake, .dice-land { animation: none !important; }
           .lp-title, .lp-rise, .lp-racer, .lp-hop, .lp-host-ticket { animation: none !important; }
+          .ma-sparkle { display: none; }
           .lp-press { transition: none; }
           /* Motion off: keep colour/shadow feedback, drop movement and effects. */
           .lp-ticket, .lp-ticket:hover, .lp-ticket:active, .lp-ticket[data-pressed], .lp-slip:hover { transform: none !important; }
@@ -2047,6 +2057,51 @@ function OnboardingBanner({ id, seen, dismiss, children }) {
   );
 }
 
+// Wraps the "Magical Athlete" wordmark and adds a few twinkling stars around
+// it. The stars are absolutely positioned, so they take no layout space, and
+// they are decorative: hidden from assistive tech and switched off under
+// prefers-reduced-motion (see .ma-sparkle in the stylesheet).
+const LOGO_STARS = [
+  { left: "-3%", top: "-10%", size: 20, delay: "0s" },
+  { right: "1%", top: "-18%", size: 13, delay: "1.6s" },
+  { right: "-4%", bottom: "-2%", size: 17, delay: "3.1s" },
+  { left: "24%", bottom: "-16%", size: 11, delay: "2.3s" },
+];
+
+function LogoSparkles({ children }) {
+  return (
+    <span className="relative inline-block">
+      {children}
+      {LOGO_STARS.map((s, i) => (
+        <svg
+          key={i}
+          aria-hidden="true"
+          className="ma-sparkle"
+          viewBox="0 0 24 24"
+          width={s.size}
+          height={s.size}
+          style={{
+            left: s.left,
+            right: s.right,
+            top: s.top,
+            bottom: s.bottom,
+            animationDelay: s.delay,
+            animationDuration: `${4.8 + i * 0.3}s`,
+          }}
+        >
+          <path
+            d="M12 0 C12.8 7 17 11.2 24 12 C17 12.8 12.8 17 12 24 C11.2 17 7 12.8 0 12 C7 11.2 11.2 7 12 0 Z"
+            fill="var(--yellow)"
+            stroke="#1A1408"
+            strokeWidth="1.4"
+            strokeLinejoin="round"
+          />
+        </svg>
+      ))}
+    </span>
+  );
+}
+
 function Header({ status }) {
   const statusLabel =
     status === "setup"
@@ -2065,12 +2120,14 @@ function Header({ status }) {
         </span>
         <Sparkles size={16} color="var(--yellow)" />
       </div>
-      <h1
-        className="font-display comic-title lp-settle text-5xl sm:text-6xl inline-block"
-        style={{ color: "#FFFCF5", letterSpacing: "0.01em", transform: "rotate(-2deg)" }}
-      >
-        Magical Athlete
-      </h1>
+      <LogoSparkles>
+        <h1
+          className="font-display comic-title lp-settle text-5xl sm:text-6xl inline-block"
+          style={{ color: "#FFFCF5", letterSpacing: "0.01em", transform: "rotate(-2deg)" }}
+        >
+          Magical Athlete
+        </h1>
+      </LogoSparkles>
       <p className="font-mono text-xs mt-2" style={{ color: "var(--onBg)" }}>
         {statusLabel}
       </p>
@@ -2304,12 +2361,14 @@ function LandingHero() {
         </span>
         <Sparkles size={16} color="var(--yellow)" />
       </div>
-      <h1
-        className="font-display comic-title lp-title text-5xl sm:text-6xl inline-block"
-        style={{ color: "#FFFCF5", letterSpacing: "0.01em", transform: "rotate(-2deg)" }}
-      >
-        Magical Athlete
-      </h1>
+      <LogoSparkles>
+        <h1
+          className="font-display comic-title lp-title text-5xl sm:text-6xl inline-block"
+          style={{ color: "#FFFCF5", letterSpacing: "0.01em", transform: "rotate(-2deg)" }}
+        >
+          Magical Athlete
+        </h1>
+      </LogoSparkles>
       <p className="font-mono text-xs mt-3 lp-rise" style={{ color: "var(--onBg)", animationDelay: "0.35s" }}>
         The race book for game night
       </p>
