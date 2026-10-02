@@ -2411,13 +2411,22 @@ function HelpPanel({ onClose }) {
 // First thing anyone sees. Replaces <Header> while no role is picked yet.
 // A first-time visitor gets the finish-line flag wipe on the title once per
 // page load; anyone with a saved game or race history, and anyone who prefers
-// reduced motion, sees the title straight away.
+// reduced motion, sees the title straight away. Tapping the title replays it.
 let maFlagPlayed = false;
 
 function LandingHero({ ready = true, skipFlag = false }) {
   // "wait" keeps the title hidden until we know whether to play the wipe, so
   // returning players never see it flash and then disappear.
   const [phase, setPhase] = useState("wait");
+  // Tapping the title replays the wipe (changing the key restarts every
+  // animation inside it), so it can be shown again on demand.
+  const [replayN, setReplayN] = useState(0);
+  const replay = () => {
+    if (prefersReducedMotion()) return;
+    maFlagPlayed = true;
+    setPhase("play");
+    setReplayN((n) => n + 1);
+  };
   useEffect(() => {
     if (phase !== "wait") return undefined;
     const decide = () => {
@@ -2448,16 +2457,18 @@ function LandingHero({ ready = true, skipFlag = false }) {
       </div>
       <LogoSparkles base={base}>
         <h1
-          className="relative font-display comic-title lp-title text-5xl sm:text-6xl inline-block"
+          className="relative font-display comic-title lp-title text-5xl sm:text-6xl inline-block cursor-pointer"
           style={{ color: "#FFFCF5", letterSpacing: "0.01em", transform: "rotate(-2deg)" }}
+          onClick={replay}
         >
           <span
+            key={`t${replayN}`}
             className={play ? "ma-reveal" : undefined}
             style={{ display: "inline-block", opacity: phase === "wait" ? 0 : 1 }}
           >
             <BounceText text="Magical Athlete" base={base} />
           </span>
-          {play && <span className="ma-flag" aria-hidden="true" />}
+          {play && <span key={`f${replayN}`} className="ma-flag" aria-hidden="true" />}
         </h1>
       </LogoSparkles>
       <p className="font-mono text-xs mt-3 lp-rise" style={{ color: "var(--onBg)", animationDelay: "0.35s" }}>
