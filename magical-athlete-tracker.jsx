@@ -1580,6 +1580,30 @@ export default function App() {
         }
         .dice-tumble { animation: diceTumble 0.5s ease-in-out; }
 
+        /* Draft roll-off: a hard cup-shake while faces flicker, then a
+           squash-and-bounce landing when the real result is revealed. */
+        @keyframes diceShake {
+          0%   { transform: translate(0, 0) rotate(0deg); }
+          10%  { transform: translate(-5px, -7px) rotate(-16deg); }
+          20%  { transform: translate(6px, 3px) rotate(14deg); }
+          30%  { transform: translate(-4px, -9px) rotate(-10deg) scale(1.08); }
+          40%  { transform: translate(7px, 2px) rotate(18deg); }
+          50%  { transform: translate(-6px, -5px) rotate(-14deg) scale(1.1); }
+          60%  { transform: translate(5px, 4px) rotate(10deg); }
+          70%  { transform: translate(-3px, -8px) rotate(-18deg) scale(1.06); }
+          80%  { transform: translate(6px, 1px) rotate(12deg); }
+          90%  { transform: translate(-2px, -4px) rotate(-6deg); }
+          100% { transform: translate(0, 0) rotate(0deg); }
+        }
+        .dice-shake { animation: diceShake 0.42s linear infinite; }
+        @keyframes diceLand {
+          0%   { transform: scale(1.45) rotate(-14deg); box-shadow: 0 0 0 0 var(--highlight); }
+          45%  { transform: scale(0.88) rotate(5deg); }
+          70%  { transform: scale(1.08) rotate(-2deg); box-shadow: 0 0 0 9px transparent; }
+          100% { transform: scale(1) rotate(0deg); }
+        }
+        .dice-land { animation: diceLand 0.5s cubic-bezier(0.2, 0.8, 0.3, 1) both; }
+
         /* Landing screen */
         @keyframes lpTitleDrop {
           0%   { opacity: 0; transform: translateY(-28px) rotate(-7deg) scale(0.88); }
@@ -1738,6 +1762,7 @@ export default function App() {
         .rank-pop { animation: rankPop 0.3s ease-out both; }
         @media (prefers-reduced-motion: reduce) {
           .rank-pop, .lp-stamp, .lp-squash, .lp-stub-tear, .lp-leave, .lp-shake, .lp-settle, .lp-arrive > * { animation: none !important; }
+          .dice-shake, .dice-land { animation: none !important; }
           .lp-title, .lp-rise, .lp-racer, .lp-hop, .lp-host-ticket { animation: none !important; }
           .lp-press { transition: none; }
           /* Motion off: keep colour/shadow feedback, drop movement and effects. */
@@ -3606,6 +3631,8 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
 
   // roll-off
   const [rolls, setRolls] = useState({}); // seatIndex -> die value
+  const [rollingFaces, setRollingFaces] = useState({}); // seatIndex -> cosmetic face shown mid-shake
+  const rollTimers = useRef({}); // seatIndex -> pending animation timeout
   const [rollMode, setRollMode] = useState("app"); // "app" (in-app dice) | "physical" (enter real rolls)
   const [seatOrder, setSeatOrder] = useState([]); // resolved order: array of seat indices, best first
   const [tieGroup, setTieGroup] = useState(null); // seat indices still tied
@@ -3643,7 +3670,22 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
   const hasDuplicateLabels = new Set(resolvedLabels).size !== resolvedLabels.length;
 
   // ---- roll-off ----
+  const clearRollTimers = () => {
+    Object.values(rollTimers.current).forEach(clearTimeout);
+    rollTimers.current = {};
+    setRollingFaces({});
+  };
+
+  // Stop any in-flight shake if the assistant closes mid-roll.
+  useEffect(
+    () => () => {
+      Object.values(rollTimers.current).forEach(clearTimeout);
+    },
+    []
+  );
+
   const startRolloff = () => {
+    clearRollTimers();
     setRolls({});
     setSeatOrder([]);
     setTieGroup(null);
@@ -3652,13 +3694,49 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
 
   const switchRollMode = (m) => {
     if (m === rollMode) return;
+    clearRollTimers();
     setRollMode(m);
     setRolls({});
     setTieGroup(null);
   };
 
+  const ROLL_ANIM_MS = 1100;
+
   const rollFor = (seatIdx) => {
-    setRolls((prev) => ({ ...prev, [seatIdx]: rollSingleDie() }));
+    if (rolls[seatIdx] != null || rollTimers.current[seatIdx]) return;
+    // The fair result is drawn once, up front, from the same unbiased
+    // rollSingleDie() as before. Everything shown during the shake is
+    // cosmetic; the real value is only revealed (and counted) on landing.
+    const result = rollSingleDie();
+    if (prefersReducedMotion()) {
+      setRolls((prev) => ({ ...prev, [seatIdx]: result }));
+      return;
+    }
+    const start = Date.now();
+    let delay = 55;
+    let lastFace = 0;
+    const step = () => {
+      if (Date.now() - start >= ROLL_ANIM_MS) {
+        delete rollTimers.current[seatIdx];
+        setRollingFaces((prev) => {
+          const next = { ...prev };
+          delete next[seatIdx];
+          return next;
+        });
+        setRolls((prev) => ({ ...prev, [seatIdx]: result }));
+        return;
+      }
+      let face;
+      do {
+        face = 1 + Math.floor(Math.random() * 6);
+      } while (face === lastFace);
+      lastFace = face;
+      setRollingFaces((prev) => ({ ...prev, [seatIdx]: face }));
+      // Faces flicker fast, then slow down as the die "settles".
+      delay = Math.min(delay * 1.1, 190);
+      rollTimers.current[seatIdx] = setTimeout(step, delay);
+    };
+    step();
   };
 
   const setManualRoll = (seatIdx, raw) => {
@@ -3677,6 +3755,9 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
 
   const contenders = tieGroup || Array.from({ length: playerCount }, (_, i) => i);
   const allRolled = contenders.every((s) => rolls[s] != null);
+  // Highest roll once everyone has landed — highlighted so the winner is obvious.
+  const topRoll = allRolled ? Math.max(...contenders.map((s) => rolls[s])) : null;
+  const topCount = topRoll != null ? contenders.filter((s) => rolls[s] === topRoll).length : 0;
 
   const waves = variant.waves(playerCount);
   const totalWaves = waves.length;
@@ -4025,11 +4106,17 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
             : "Roll your own dice, then enter each player's result (1–6). Highest drafts first."}
         </p>
         <div className="space-y-1.5 mb-3">
-          {contenders.map((seat) => (
+          {contenders.map((seat) => {
+            const isRolling = rollingFaces[seat] != null;
+            const isTop = rollMode === "app" && topRoll != null && rolls[seat] === topRoll;
+            return (
             <div
               key={seat}
-              className="flex items-center justify-between px-3 py-2 rounded-lg"
-              style={{ background: "var(--paper)" }}
+              className="flex items-center justify-between px-3 py-2 rounded-lg transition-colors"
+              style={{
+                background: isTop ? "var(--highlight)" : "var(--paper)",
+                minHeight: rollMode === "app" ? 64 : undefined,
+              }}
             >
               <span className="text-sm font-medium">{labelFor(seat)}</span>
               {rollMode === "physical" ? (
@@ -4045,9 +4132,28 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
                   style={{ borderColor: "var(--ink)", background: "var(--paper2)" }}
                   aria-label={`${labelFor(seat)} die roll`}
                 />
-              ) : rolls[seat] != null ? (
-                <span className="font-mono font-bold text-lg" style={{ color: "var(--red)" }}>
-                  🎲 {rolls[seat]}
+              ) : isRolling || rolls[seat] != null ? (
+                <span
+                  className="flex items-center gap-3"
+                  role="status"
+                  aria-label={isRolling ? `${labelFor(seat)} is rolling` : `${labelFor(seat)} rolled ${rolls[seat]}`}
+                >
+                  {isTop && (
+                    <span className="text-xs font-mono font-bold" style={{ color: "var(--red)" }}>
+                      {topCount > 1 ? "TIE" : "FIRST"}
+                    </span>
+                  )}
+                  {!isRolling && (
+                    <span className="font-mono font-bold text-lg" style={{ color: "var(--red)" }}>
+                      {rolls[seat]}
+                    </span>
+                  )}
+                  <DieFace
+                    value={isRolling ? rollingFaces[seat] : rolls[seat]}
+                    size={48}
+                    color="var(--red)"
+                    className={isRolling ? "dice-shake" : "dice-land"}
+                  />
                 </span>
               ) : (
                 <button
@@ -4059,7 +4165,8 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
                 </button>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
         <button
           onClick={resolveRolloff}
@@ -6101,16 +6208,22 @@ const PIP_LAYOUTS = {
   6: [1, 0, 1, 1, 0, 1, 1, 0, 1],
 };
 
-function DieFace({ value, rolling, color }) {
+// `size` defaults to the Dice tab's 96px; the draft roll-off uses a smaller die.
+// `className` lets a caller add an animation class (dice-shake / dice-land).
+function DieFace({ value, rolling, color, size = 96, className = "" }) {
+  const small = size < 64;
   return (
     <div
-      className={`rounded-2xl grid grid-cols-3 grid-rows-3 gap-0.5 p-3 ${rolling ? "dice-tumble" : ""}`}
+      className={`${small ? "rounded-xl" : "rounded-2xl"} grid grid-cols-3 grid-rows-3 gap-0.5 ${
+        rolling ? "dice-tumble" : ""
+      } ${className}`}
       style={{
-        width: 96,
-        height: 96,
+        width: size,
+        height: size,
+        padding: Math.round(size * 0.125),
         background: "var(--paper2)",
-        border: "3px solid var(--ink)",
-        boxShadow: "4px 4px 0px var(--ink)",
+        border: small ? "2.5px solid var(--ink)" : "3px solid var(--ink)",
+        boxShadow: small ? "3px 3px 0px var(--ink)" : "4px 4px 0px var(--ink)",
       }}
     >
       {(PIP_LAYOUTS[value] || PIP_LAYOUTS[1]).map((on, i) => (
@@ -6118,7 +6231,11 @@ function DieFace({ value, rolling, color }) {
           {on ? (
             <span
               className="rounded-full"
-              style={{ width: 16, height: 16, background: color || "var(--ink)" }}
+              style={{
+                width: Math.round(size / 6),
+                height: Math.round(size / 6),
+                background: color || "var(--ink)",
+              }}
             />
           ) : null}
         </div>
