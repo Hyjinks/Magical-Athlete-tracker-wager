@@ -1773,25 +1773,19 @@ export default function App() {
       `}</style>
 
       <div className="max-w-3xl mx-auto px-4 pb-24">
-        {mode === null ? <LandingHero /> : <Header status={mode === "host" ? status : null} />}
-        <div className="flex items-center justify-center gap-2 mb-4">
+        {/* Slim top bar: theme toggle left, house rules + help right. Lives above
+            the hero (not below it) so the start options sit higher on phones,
+            and the panels open directly under the buttons that opened them. */}
+        <div className="flex items-center justify-between gap-2 pt-2">
           <ThemeSwitcher themeId={themeId} changeTheme={changeTheme} />
-          <button
-            onClick={() => setShowSettings((v) => !v)}
-            aria-label="House rules"
-            className="w-12 h-12 rounded-full flex items-center justify-center text-base font-mono font-bold shrink-0"
-            style={{ background: "var(--paper)", color: "var(--ink)", border: "1.5px solid var(--onBgMuted)" }}
-          >
-            ⚙
-          </button>
-          <button
-            onClick={() => setShowHelp((v) => !v)}
-            aria-label="How this app works"
-            className="w-12 h-12 rounded-full flex items-center justify-center text-base font-mono font-bold shrink-0"
-            style={{ background: "var(--paper)", color: "var(--ink)", border: "1.5px solid var(--onBgMuted)" }}
-          >
-            ?
-          </button>
+          <div className="flex items-center">
+            <ChromeButton onClick={() => setShowSettings((v) => !v)} label="House rules">
+              ⚙
+            </ChromeButton>
+            <ChromeButton onClick={() => setShowHelp((v) => !v)} label="How this app works">
+              ?
+            </ChromeButton>
+          </div>
         </div>
         {showSettings && (
           <SettingsPanel
@@ -1801,6 +1795,8 @@ export default function App() {
           />
         )}
         {showHelp && <HelpPanel onClose={() => setShowHelp(false)} />}
+
+        {mode === null ? <LandingHero /> : <Header status={mode === "host" ? status : null} />}
 
         {mode === null && onboardingLoaded && ready && !onboardingSeen["intro-tour"] && !savedSession && historyIndex.length === 0 && (
           <IntroTour onDone={() => dismissOnboarding("intro-tour")} />
@@ -2062,7 +2058,7 @@ function Header({ status }) {
       ? "Race finished"
       : "Racing game companion";
   return (
-    <div className="pt-8 pb-5 text-center">
+    <div className="pt-2 pb-5 text-center">
       <div className="flex items-center justify-center gap-2 mb-2">
         <Sparkles size={16} color="var(--yellow)" />
         <span className="font-mono text-xs tracking-widest uppercase" style={{ color: "var(--yellow)" }}>
@@ -2083,31 +2079,72 @@ function Header({ status }) {
   );
 }
 
+// Compact on screen, still a 48px hit area: each button is the tap target and
+// the visible pill is drawn by the inner span; the dark track behind them is
+// a separate 36px-tall layer. (Same pattern as SwitchButton.)
 function ThemeSwitcher({ themeId, changeTheme }) {
   return (
-    <div className="flex justify-center mb-4">
+    <div role="group" aria-label="Theme" className="relative inline-flex items-center">
       <div
-        className="inline-flex rounded-full p-0.5 gap-0.5"
-        style={{ background: "rgba(0,0,0,0.15)", border: "1.5px solid var(--onBgMuted)" }}
-      >
-        {Object.entries(THEMES).map(([id, t]) => {
-          const active = themeId === id;
-          return (
-            <button
-              key={id}
-              onClick={() => changeTheme(id)}
-              className="px-5 rounded-full text-xs font-mono font-semibold"
+        aria-hidden="true"
+        className="absolute inset-x-0 rounded-full"
+        style={{
+          top: "50%",
+          height: 36,
+          transform: "translateY(-50%)",
+          background: "rgba(0,0,0,0.15)",
+          border: "1.5px solid var(--onBgMuted)",
+        }}
+      />
+      {Object.entries(THEMES).map(([id, t]) => {
+        const active = themeId === id;
+        return (
+          <button
+            key={id}
+            onClick={() => changeTheme(id)}
+            aria-pressed={active}
+            className="relative flex items-center justify-center"
+            style={{ background: "transparent", border: "none" }}
+          >
+            <span
+              className="flex items-center justify-center rounded-full px-4 text-xs font-mono font-semibold"
               style={{
+                height: 30,
                 background: active ? "var(--paper)" : "transparent",
                 color: active ? "var(--ink)" : "var(--onBgMuted)",
               }}
             >
               {t.label}
-            </button>
-          );
-        })}
-      </div>
+            </span>
+          </button>
+        );
+      })}
     </div>
+  );
+}
+
+// Round icon button for the top bar: 36px circle inside a 48px hit area.
+function ChromeButton({ onClick, label, children }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      className="shrink-0 flex items-center justify-center"
+      style={{ background: "transparent", border: "none" }}
+    >
+      <span
+        className="flex items-center justify-center rounded-full text-sm font-mono font-bold"
+        style={{
+          width: 36,
+          height: 36,
+          background: "var(--paper)",
+          color: "var(--ink)",
+          border: "1.5px solid var(--onBgMuted)",
+        }}
+      >
+        {children}
+      </span>
+    </button>
   );
 }
 
@@ -2246,7 +2283,7 @@ function LandingHero() {
     { color: PALETTE[2], dur: "5.5s", delay: "1.9s", rest: "40%" },
   ];
   return (
-    <div className="pt-8 pb-4 text-center">
+    <div className="pt-2 pb-4 text-center">
       <div className="flex items-center justify-center gap-2 mb-2">
         <Sparkles size={16} color="var(--yellow)" />
         <span className="font-mono text-xs tracking-widest uppercase" style={{ color: "var(--yellow)" }}>
