@@ -1618,19 +1618,6 @@ export default function App() {
         /* "backwards", not "both": a held end-state transform would override every
            hover/press transform on these elements (animations beat normal rules). */
         .lp-rise { animation: lpRise 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) backwards; }
-        @keyframes lpRun {
-          0%   { left: 2%; opacity: 0; }
-          6%   { opacity: 1; }
-          80%  { left: 86%; opacity: 1; }
-          94%  { left: 86%; opacity: 1; }
-          100% { left: 86%; opacity: 0; }
-        }
-        .lp-racer { animation: lpRun 5.5s ease-in-out infinite; }
-        @keyframes lpHop {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-3px); }
-        }
-        .lp-hop { animation: lpHop 0.45s ease-in-out infinite; }
         /* Idle glow on the Host ticket. Uses filter (not box-shadow) so the
            hover/press shadow changes below stay free to animate. */
         @keyframes lpTicketGlow {
@@ -1704,6 +1691,15 @@ export default function App() {
           90%           { opacity: 0.9; transform: scale(0.7) rotate(80deg); }
         }
         .ma-sparkle { position: absolute; pointer-events: none; opacity: 0; animation: maSparkle 5s ease-in-out infinite; }
+        /* Letter bounce on the wordmark: each letter hops a few pixels in turn,
+           left to right, then the title rests before the next pass. */
+        @keyframes maLetter {
+          0%, 40%, 100% { transform: translateY(0); }
+          12%           { transform: translateY(-5px); }
+          24%           { transform: translateY(1px); }
+          32%           { transform: translateY(-1px); }
+        }
+        .ma-letter { display: inline-block; animation: maLetter 3.6s ease-in-out infinite; }
         .lp-press { transition: transform 0.12s ease, box-shadow 0.12s ease; }
         .lp-press:active { transform: translate(3px, 3px) scale(0.99); box-shadow: 2px 2px 0px var(--ink) !important; }
         /* ---- Interactive landing cards ----
@@ -1772,7 +1768,8 @@ export default function App() {
         @media (prefers-reduced-motion: reduce) {
           .rank-pop, .lp-stamp, .lp-squash, .lp-stub-tear, .lp-leave, .lp-shake, .lp-settle, .lp-arrive > * { animation: none !important; }
           .dice-shake, .dice-land { animation: none !important; }
-          .lp-title, .lp-rise, .lp-racer, .lp-hop, .lp-host-ticket { animation: none !important; }
+          .lp-title, .lp-rise, .lp-host-ticket { animation: none !important; }
+          .ma-letter { animation: none !important; }
           .ma-sparkle { display: none; }
           .lp-press { transition: none; }
           /* Motion off: keep colour/shadow feedback, drop movement and effects. */
@@ -2068,6 +2065,47 @@ const LOGO_STARS = [
   { left: "24%", bottom: "-16%", size: 11, delay: "2.3s" },
 ];
 
+// Splits a title into per-letter spans so each letter can bounce on its own
+// delay. Words stay together (no break inside a word); the letters are
+// hidden from assistive tech and the full text is read once instead.
+function BounceText({ text }) {
+  let n = 0;
+  const words = text.split(" ");
+  return (
+    <>
+      <span
+        style={{
+          position: "absolute",
+          width: 1,
+          height: 1,
+          overflow: "hidden",
+          clip: "rect(0 0 0 0)",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {text}
+      </span>
+      <span aria-hidden="true">
+        {words.map((word, wi) => (
+          <React.Fragment key={wi}>
+            {wi > 0 ? " " : null}
+            <span style={{ display: "inline-block", whiteSpace: "nowrap" }}>
+              {word.split("").map((ch) => {
+                const delay = `${(n++ * 0.07).toFixed(2)}s`;
+                return (
+                  <span key={n} className="ma-letter" style={{ animationDelay: delay }}>
+                    {ch}
+                  </span>
+                );
+              })}
+            </span>
+          </React.Fragment>
+        ))}
+      </span>
+    </>
+  );
+}
+
 function LogoSparkles({ children }) {
   return (
     <span className="relative inline-block">
@@ -2125,7 +2163,7 @@ function Header({ status }) {
           className="font-display comic-title lp-settle text-5xl sm:text-6xl inline-block"
           style={{ color: "#FFFCF5", letterSpacing: "0.01em", transform: "rotate(-2deg)" }}
         >
-          Magical Athlete
+          <BounceText text="Magical Athlete" />
         </h1>
       </LogoSparkles>
       <p className="font-mono text-xs mt-2" style={{ color: "var(--onBg)" }}>
@@ -2342,16 +2380,7 @@ function HelpPanel({ onClose }) {
 }
 
 // First thing anyone sees. Replaces <Header> while no role is picked yet.
-// A tiny looping race strip says "this is a racing game" in about a second;
-// it's decorative, so it's hidden from assistive tech and switched off
-// entirely under prefers-reduced-motion (racers sit at fixed spots instead).
 function LandingHero() {
-  const lanes = [
-    { color: PALETTE[0], dur: "5.2s", delay: "0s", rest: "70%" },
-    { color: PALETTE[3], dur: "5.8s", delay: "0.6s", rest: "52%" },
-    { color: PALETTE[1], dur: "6.4s", delay: "1.2s", rest: "62%" },
-    { color: PALETTE[2], dur: "5.5s", delay: "1.9s", rest: "40%" },
-  ];
   return (
     <div className="pt-2 pb-4 text-center">
       <div className="flex items-center justify-center gap-2 mb-2">
@@ -2366,59 +2395,12 @@ function LandingHero() {
           className="font-display comic-title lp-title text-5xl sm:text-6xl inline-block"
           style={{ color: "#FFFCF5", letterSpacing: "0.01em", transform: "rotate(-2deg)" }}
         >
-          Magical Athlete
+          <BounceText text="Magical Athlete" />
         </h1>
       </LogoSparkles>
       <p className="font-mono text-xs mt-3 lp-rise" style={{ color: "var(--onBg)", animationDelay: "0.35s" }}>
         The race book for game night
       </p>
-
-      <div
-        aria-hidden="true"
-        className="lp-rise mt-5 mx-auto rounded-2xl px-3 py-2.5"
-        style={{
-          maxWidth: 340,
-          background: "rgba(0,0,0,0.18)",
-          border: "2px solid var(--onBgMuted)",
-          animationDelay: "0.5s",
-        }}
-      >
-        {lanes.map((l, i) => (
-          <div key={i} className="relative" style={{ height: 22 }}>
-            <div
-              className="absolute left-0 right-0"
-              style={{ top: 11, borderTop: "2px dashed var(--onBgMuted)", opacity: 0.45 }}
-            />
-            <div
-              className="absolute"
-              style={{
-                right: 2,
-                top: 3,
-                width: 10,
-                height: 16,
-                background:
-                  "repeating-conic-gradient(#1A1408 0% 25%, #FFFCF5 0% 50%) 0 0 / 8px 8px",
-                border: "1.5px solid #1A1408",
-              }}
-            />
-            <div
-              className="lp-racer absolute"
-              style={{ left: l.rest, top: 3, animationDuration: l.dur, animationDelay: l.delay }}
-            >
-              <div
-                className="lp-hop rounded-full"
-                style={{
-                  width: 16,
-                  height: 16,
-                  background: l.color,
-                  border: "2.5px solid #1A1408",
-                  animationDelay: l.delay,
-                }}
-              />
-            </div>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
