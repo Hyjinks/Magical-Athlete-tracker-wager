@@ -5065,18 +5065,24 @@ function SetupTab({
                           : `Set ${r.name || "racer"}'s color`
                       }
                       aria-pressed={r.color === c}
-                      style={{ background: "transparent", opacity: takenBy ? 0.25 : 1 }}
+                      style={{ background: "transparent", opacity: takenBy ? 0.45 : 1 }}
                     >
                       <span
-                        className="block rounded-full"
+                        className="flex items-center justify-center rounded-full"
                         style={{
                           width: 26,
                           height: 26,
                           background: c,
                           border: "3px solid",
                           borderColor: r.color === c ? "var(--ink)" : "transparent",
+                          color: "var(--ink)",
+                          fontSize: 14,
+                          fontWeight: 700,
+                          lineHeight: 1,
                         }}
-                      />
+                      >
+                        {takenBy ? "✕" : null}
+                      </span>
                     </button>
                   );
                 })}
