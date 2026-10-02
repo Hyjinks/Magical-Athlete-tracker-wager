@@ -5144,6 +5144,8 @@ function SetupTab({
 // newest-first (how it's displayed elsewhere), so it's reversed here for
 // chronological playback. Already-undone moves aren't in the log at all, so
 // replaying it exactly reproduces the real final positions.
+const REPLAY_ROW_H = 28;
+
 function ReplayView({ racers, turnLog, trackLength }) {
   const chronological = [...turnLog].reverse();
   const [step, setStep] = useState(0);
@@ -5200,11 +5202,23 @@ function ReplayView({ racers, turnLog, trackLength }) {
   return (
     <Card>
       <SectionTitle icon={Clock}>Instant replay</SectionTitle>
-      <div className="space-y-1.5 mb-3">
-        {sorted.map((r) => {
+      {/* Rows keep a fixed DOM order and slide to their rank, so an overtake
+          is a smooth swap instead of the rows jumping. */}
+      <div className="mb-3 relative" style={{ height: racers.length * REPLAY_ROW_H }}>
+        {racers.map((r) => {
           const pos = positions[r.name] || 0;
+          const rank = sorted.indexOf(r);
           return (
-            <div key={r.id} className="flex items-center gap-2 text-sm">
+            <div
+              key={r.id}
+              className="absolute left-0 right-0 flex items-center gap-2 text-sm"
+              style={{
+                height: REPLAY_ROW_H,
+                transform: `translateY(${rank * REPLAY_ROW_H}px)`,
+                transition: "transform 450ms cubic-bezier(0.34, 1.2, 0.5, 1)",
+                zIndex: currentMove && currentMove.racerName === r.name ? 1 : 0,
+              }}
+            >
               <span
                 className="w-2.5 h-2.5 rounded-full inline-block shrink-0"
                 style={{ background: r.color }}
@@ -5219,7 +5233,7 @@ function ReplayView({ racers, turnLog, trackLength }) {
                   style={{
                     width: `${(pos / trackLength) * 100}%`,
                     background: r.color,
-                    transition: "width 500ms ease-out",
+                    transition: "width 450ms cubic-bezier(0.4, 0, 0.2, 1)",
                   }}
                 />
               </div>
