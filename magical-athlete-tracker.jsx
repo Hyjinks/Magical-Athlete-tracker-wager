@@ -493,6 +493,48 @@ function useStorage() {
   return { ready, roster, setRoster, bettorRoster, historyIndex, setHistoryIndex, savedSession };
 }
 
+// Pick-one number tile: raised sticker when idle, pressed flat + yellow with a
+// red tick badge when selected.
+function NumberPick({ value, selected, onSelect }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      onClick={onSelect}
+      className="relative w-12 h-12 rounded-lg text-sm font-mono font-bold"
+      style={{
+        background: selected ? "var(--yellow)" : "var(--paper)",
+        color: "var(--ink)",
+        border: "2.5px solid var(--ink)",
+        boxShadow: selected ? "0 0 0 var(--ink)" : "3px 3px 0 var(--ink)",
+        transform: selected ? "translate(3px, 3px)" : "none",
+        transition: "transform 80ms, box-shadow 80ms",
+      }}
+    >
+      {value}
+      {selected && (
+        <span
+          aria-hidden="true"
+          className="absolute flex items-center justify-center rounded-full"
+          style={{
+            top: -9,
+            right: -9,
+            width: 20,
+            height: 20,
+            background: "var(--red)",
+            color: "var(--paper2)",
+            border: "2px solid var(--ink)",
+            fontSize: 11,
+            lineHeight: 1,
+          }}
+        >
+          ✓
+        </span>
+      )}
+    </button>
+  );
+}
+
 export default function App() {
   const { ready, roster, bettorRoster, historyIndex, setHistoryIndex, savedSession } = useStorage();
   const { seen: onboardingSeen, dismiss: dismissOnboarding, loaded: onboardingLoaded } = useOnboarding();
@@ -4240,21 +4282,10 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
             <p className="font-mono text-xs mb-1.5" style={{ color: "var(--muted)" }}>
               Players
             </p>
-            <div className="flex flex-wrap gap-1.5 mb-3">
+            <div className="flex flex-wrap gap-2.5 pt-2 pr-2 mb-3">
               {Array.from({ length: variant.maxPlayers - variant.minPlayers + 1 }, (_, k) => variant.minPlayers + k).map(
                 (n) => (
-                  <button
-                    key={n}
-                    onClick={() => setCount(n)}
-                    className="w-12 h-12 rounded-lg text-sm font-mono font-bold border-2"
-                    style={{
-                      background: playerCount === n ? "var(--yellow)" : "var(--paper)",
-                      borderColor: playerCount === n ? "var(--yellow)" : "var(--ink)",
-                      color: "var(--ink)",
-                    }}
-                  >
-                    {n}
-                  </button>
+                  <NumberPick key={n} value={n} selected={playerCount === n} onSelect={() => setCount(n)} />
                 )
               )}
             </div>
@@ -4266,20 +4297,9 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
             <p className="font-mono text-xs mb-1.5" style={{ color: "var(--muted)" }}>
               Races in this game
             </p>
-            <div className="flex flex-wrap gap-1.5 mb-3">
+            <div className="flex flex-wrap gap-2.5 pt-2 pr-2 mb-3">
               {[2, 3, 4].map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setRaceCount(n)}
-                  className="w-12 h-12 rounded-lg text-sm font-mono font-bold border-2"
-                  style={{
-                    background: raceCount === n ? "var(--yellow)" : "var(--paper)",
-                    borderColor: raceCount === n ? "var(--yellow)" : "var(--ink)",
-                    color: "var(--ink)",
-                  }}
-                >
-                  {n}
-                </button>
+                <NumberPick key={n} value={n} selected={raceCount === n} onSelect={() => setRaceCount(n)} />
               ))}
             </div>
             {raceCount !== 4 && (
