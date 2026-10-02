@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* The page background matches the poster theme so overscroll and the
+   area behind the app never flash white. */
+:root { --page-bg: #E5402A; color-scheme: light; }
+html, body, #root { min-height: 100%; }
+body { background: var(--page-bg); margin: 0; }

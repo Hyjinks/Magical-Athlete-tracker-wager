@@ -5957,6 +5957,10 @@ function TrackTab({
   const flashTimer = useRef(null);
   const [rankFlash, setRankFlash] = useState({});
 
+  // Deliberately has no dependency list: it measures row positions after every
+  // render, and only acts when `orderKey` differs from the previous render, so
+  // the setState inside can't loop.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useLayoutEffect(() => {
     const tops = {};
     Object.entries(rowRefs.current).forEach(([id, el]) => {
