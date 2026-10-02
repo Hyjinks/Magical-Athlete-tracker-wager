@@ -1773,24 +1773,23 @@ export default function App() {
       `}</style>
 
       <div className="max-w-3xl mx-auto px-4 pb-24">
-        {/* Slim top bar: theme toggle left, house rules + help right. Lives above
-            the hero (not below it) so the start options sit higher on phones,
-            and the panels open directly under the buttons that opened them. */}
-        <div className="flex items-center justify-between gap-2 pt-2">
-          <ThemeSwitcher themeId={themeId} changeTheme={changeTheme} />
-          <div className="flex items-center">
-            <ChromeButton onClick={() => setShowSettings((v) => !v)} label="House rules">
-              ⚙
-            </ChromeButton>
-            <ChromeButton onClick={() => setShowHelp((v) => !v)} label="How this app works">
-              ?
-            </ChromeButton>
-          </div>
+        {/* Slim top bar: settings + help in the upper right. Lives above the hero
+            (not below it) so the start options sit higher on phones, and the
+            panels open directly under the buttons that opened them. */}
+        <div className="flex items-center justify-end pt-2">
+          <ChromeButton onClick={() => setShowSettings((v) => !v)} label="Settings">
+            ⚙
+          </ChromeButton>
+          <ChromeButton onClick={() => setShowHelp((v) => !v)} label="How this app works">
+            ?
+          </ChromeButton>
         </div>
         {showSettings && (
           <SettingsPanel
             houseRules={houseRules}
             updateHouseRule={updateHouseRule}
+            themeId={themeId}
+            changeTheme={changeTheme}
             onClose={() => setShowSettings(false)}
           />
         )}
@@ -2079,12 +2078,12 @@ function Header({ status }) {
   );
 }
 
-// Compact on screen, still a 48px hit area: each button is the tap target and
-// the visible pill is drawn by the inner span; the dark track behind them is
-// a separate 36px-tall layer. (Same pattern as SwitchButton.)
+// Segmented Poster/Calm control for the settings panel. Each segment is a
+// 48px-tall hit area; the visible pill is drawn by the inner span, with an
+// even 3px inset inside a 36px track so it never sits flush to an edge.
 function ThemeSwitcher({ themeId, changeTheme }) {
   return (
-    <div role="group" aria-label="Theme" className="relative inline-flex items-center">
+    <div role="group" aria-label="Theme" className="relative inline-flex items-center px-1">
       <div
         aria-hidden="true"
         className="absolute inset-x-0 rounded-full"
@@ -2092,8 +2091,8 @@ function ThemeSwitcher({ themeId, changeTheme }) {
           top: "50%",
           height: 36,
           transform: "translateY(-50%)",
-          background: "rgba(0,0,0,0.15)",
-          border: "1.5px solid var(--onBgMuted)",
+          background: "var(--highlight)",
+          border: "1.5px solid var(--ink)",
         }}
       />
       {Object.entries(THEMES).map(([id, t]) => {
@@ -2110,8 +2109,8 @@ function ThemeSwitcher({ themeId, changeTheme }) {
               className="flex items-center justify-center rounded-full px-4 text-xs font-mono font-semibold"
               style={{
                 height: 30,
-                background: active ? "var(--paper)" : "transparent",
-                color: active ? "var(--ink)" : "var(--onBgMuted)",
+                background: active ? "var(--ink)" : "transparent",
+                color: active ? "var(--paper)" : "var(--ink)",
               }}
             >
               {t.label}
@@ -2205,15 +2204,29 @@ function SettingsToggle({ label, hint, checked, onChange }) {
   );
 }
 
-function SettingsPanel({ houseRules, updateHouseRule, onClose }) {
+function SettingsPanel({ houseRules, updateHouseRule, themeId, changeTheme, onClose }) {
   return (
     <Card>
       <div className="flex items-center justify-between mb-2">
-        <SectionTitle icon={Flag}>House rules</SectionTitle>
+        <SectionTitle icon={Flag}>Settings</SectionTitle>
         <button onClick={onClose} className="text-xs" style={{ color: "var(--muted)" }}>
           Close
         </button>
       </div>
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <div>
+          <p className="text-sm font-medium" style={{ color: "var(--ink)" }}>
+            Look
+          </p>
+          <p className="text-xs" style={{ color: "var(--muted)" }}>
+            Poster is bold and bright; Calm is quieter.
+          </p>
+        </div>
+        <ThemeSwitcher themeId={themeId} changeTheme={changeTheme} />
+      </div>
+      <p className="text-sm font-medium mb-1" style={{ color: "var(--ink)" }}>
+        House rules
+      </p>
       <p className="text-xs mb-3" style={{ color: "var(--muted)" }}>
         Table-level preferences for tonight — saved on this device, applied on the Betting tab.
       </p>
