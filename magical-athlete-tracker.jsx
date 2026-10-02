@@ -512,25 +512,25 @@ function NumberPick({ value, selected, onSelect }) {
       }}
     >
       {value}
-      {selected && (
-        <span
-          aria-hidden="true"
-          className="absolute flex items-center justify-center rounded-full"
-          style={{
-            top: -9,
-            right: -9,
-            width: 20,
-            height: 20,
-            background: "var(--red)",
-            color: "var(--paper2)",
-            border: "2px solid var(--ink)",
-            fontSize: 11,
-            lineHeight: 1,
-          }}
-        >
-          ✓
-        </span>
-      )}
+      <span
+        aria-hidden="true"
+        className="absolute flex items-center justify-center rounded-full"
+        style={{
+          top: -9,
+          right: -9,
+          width: 20,
+          height: 20,
+          background: "var(--red)",
+          color: "var(--paper2)",
+          border: "2px solid var(--ink)",
+          fontSize: 11,
+          lineHeight: 1,
+          transform: selected ? "scale(1)" : "scale(0)",
+          transition: "transform 150ms cubic-bezier(0.34, 1.8, 0.5, 1)",
+        }}
+      >
+        ✓
+      </span>
     </button>
   );
 }
@@ -3934,11 +3934,15 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
   const [phase, setPhase] = useState("config"); // config | rolloff | enter_cards | picking | done
   const [variantId, setVariantId] = useState("standard");
   const [playerCount, setPlayerCount] = useState(4);
+  // The player and race counts start unchosen; the host taps one to choose it
+  // (tap again to clear). Variants with a fixed player count need no choice.
+  const [playerChosen, setPlayerChosen] = useState(false);
   const [playerNames, setPlayerNames] = useState(["", "", "", ""]);
   // Race count is a house-rule shortening of the official 4-race game —
   // only meaningful for the standard variant, the only one with session
   // tracking (the champion screen, the race counter).
   const [raceCount, setRaceCount] = useState(4);
+  const [raceChosen, setRaceChosen] = useState(false);
 
   const variant = DRAFT_VARIANTS[variantId];
 
@@ -3975,12 +3979,14 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
     setVariantId(id);
     const v = DRAFT_VARIANTS[id];
     setCount(v.minPlayers === v.maxPlayers ? v.minPlayers : Math.max(v.minPlayers, 3));
+    setPlayerChosen(v.minPlayers === v.maxPlayers);
   };
 
   const labelFor = (seatIdx) => playerNames[seatIdx]?.trim() || `Player ${seatIdx + 1}`;
 
   const resolvedLabels = Array.from({ length: playerCount }, (_, i) => labelFor(i).toLowerCase());
   const hasDuplicateLabels = new Set(resolvedLabels).size !== resolvedLabels.length;
+  const configReady = playerChosen && (variantId !== "standard" || raceChosen);
 
   // ---- roll-off ----
   const clearRollTimers = () => {
@@ -4285,7 +4291,15 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
             <div className="flex flex-wrap gap-2.5 pt-2 pr-2 mb-3">
               {Array.from({ length: variant.maxPlayers - variant.minPlayers + 1 }, (_, k) => variant.minPlayers + k).map(
                 (n) => (
-                  <NumberPick key={n} value={n} selected={playerCount === n} onSelect={() => setCount(n)} />
+                  <NumberPick key={n} value={n} selected={playerChosen && playerCount === n}
+                    onSelect={() => {
+                      if (playerChosen && playerCount === n) setPlayerChosen(false);
+                      else {
+                        setCount(n);
+                        setPlayerChosen(true);
+                      }
+                    }}
+                  />
                 )
               )}
             </div>
@@ -4299,10 +4313,18 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
             </p>
             <div className="flex flex-wrap gap-2.5 pt-2 pr-2 mb-3">
               {[2, 3, 4].map((n) => (
-                <NumberPick key={n} value={n} selected={raceCount === n} onSelect={() => setRaceCount(n)} />
+                <NumberPick key={n} value={n} selected={raceChosen && raceCount === n}
+                  onSelect={() => {
+                    if (raceChosen && raceCount === n) setRaceChosen(false);
+                    else {
+                      setRaceCount(n);
+                      setRaceChosen(true);
+                    }
+                  }}
+                />
               ))}
             </div>
-            {raceCount !== 4 && (
+            {raceChosen && raceCount !== 4 && (
               <p className="text-xs mb-3" style={{ color: "var(--muted)" }}>
                 House rule — the official game is 4 races. Draft team sizes stay the same either
                 way, so everyone will have unraced benched racers left over at {raceCount}.
@@ -4311,6 +4333,8 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
           </>
         )}
 
+        {playerChosen && (
+        <>
         <p className="font-mono text-xs mb-1.5" style={{ color: "var(--muted)" }}>
           Player names (optional)
         </p>
@@ -4340,6 +4364,8 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
           Flip <strong>{cardCount}</strong> racer cards face-up in a line. Each player will end with{" "}
           <strong>{variant.teamSize}</strong> racers.
         </div>
+        </>
+        )}
 
         {hasDuplicateLabels && (
           <p className="text-xs mb-2" style={{ color: "var(--red)" }}>
@@ -4349,12 +4375,20 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
 
         <button
           onClick={startRolloff}
-          disabled={hasDuplicateLabels}
+          disabled={hasDuplicateLabels || !configReady}
           className="w-full py-3 rounded-lg text-sm font-bold disabled:opacity-40"
           style={{ background: "var(--red)", color: "var(--paper2)", border: "2.5px solid var(--ink)" }}
         >
           Roll off for draft order
         </button>
+        {!configReady && (
+          <p className="text-xs mt-2" style={{ color: "var(--muted)" }}>
+            Choose {[!playerChosen && "players", variantId === "standard" && !raceChosen && "races"]
+              .filter(Boolean)
+              .join(" and ")}{" "}
+            to continue
+          </p>
+        )}
         </>
       )
     );
