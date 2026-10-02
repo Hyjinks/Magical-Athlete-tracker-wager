@@ -1700,6 +1700,29 @@ export default function App() {
           32%           { transform: translateY(-1px); }
         }
         .ma-letter { display: inline-block; animation: maLetter 3.6s ease-in-out infinite; }
+        /* Finish-line wipe, once on a first visit: a checkered flag carries the
+           reveal edge across the title, then swooshes off to the right. The
+           flag's left edge and the clip edge move together (both are percent
+           of the title's width plus the flag's width), so no measuring is
+           needed. */
+        @keyframes maReveal {
+          from { clip-path: inset(-20px calc(100% + 2.9em) -20px -12px); }
+          to   { clip-path: inset(-20px -12px -20px -12px); }
+        }
+        .ma-reveal { animation: maReveal 1.1s cubic-bezier(0.45, 0, 0.35, 1) 0.35s both; }
+        @keyframes maSweep {
+          0%     { left: -2.9em; opacity: 1; transform: skewX(-8deg) scaleX(1); filter: blur(0); animation-timing-function: cubic-bezier(0.45, 0, 0.35, 1); }
+          75.86% { left: 100%; opacity: 1; transform: skewX(-8deg) scaleX(1); filter: blur(0); animation-timing-function: cubic-bezier(0.55, 0, 1, 0.6); }
+          100%   { left: calc(100% + 5.4em); opacity: 0; transform: skewX(-8deg) scaleX(1.7); filter: blur(3px); }
+        }
+        .ma-flag {
+          position: absolute; box-sizing: border-box; z-index: 2; pointer-events: none; opacity: 0;
+          top: 50%; height: 1.25em; margin-top: -0.625em; left: -2.9em; width: 2.9em;
+          border: 3px solid #1A1408; box-shadow: 3px 3px 0 #1A1408;
+          background: repeating-conic-gradient(#1A1408 0% 25%, #FFFCF5 0% 50%) 0 0 / 0.4167em 0.4167em;
+          background-origin: border-box; transform: skewX(-8deg); transform-origin: 0 50%;
+          animation: maSweep 1.45s linear 0.35s forwards;
+        }
         .lp-press { transition: transform 0.12s ease, box-shadow 0.12s ease; }
         .lp-press:active { transform: translate(3px, 3px) scale(0.99); box-shadow: 2px 2px 0px var(--ink) !important; }
         /* ---- Interactive landing cards ----
@@ -1769,7 +1792,8 @@ export default function App() {
           .rank-pop, .lp-stamp, .lp-squash, .lp-stub-tear, .lp-leave, .lp-shake, .lp-settle, .lp-arrive > * { animation: none !important; }
           .dice-shake, .dice-land { animation: none !important; }
           .lp-title, .lp-rise, .lp-host-ticket { animation: none !important; }
-          .ma-letter { animation: none !important; }
+          .ma-letter, .ma-reveal { animation: none !important; }
+          .ma-flag { display: none; }
           .ma-sparkle { display: none; }
           .lp-press { transition: none; }
           /* Motion off: keep colour/shadow feedback, drop movement and effects. */
@@ -1802,7 +1826,12 @@ export default function App() {
         )}
         {showHelp && <HelpPanel onClose={() => setShowHelp(false)} />}
 
-        {mode === null ? <LandingHero /> : <Header status={mode === "host" ? status : null} />}
+        {mode === null ? (
+          <LandingHero
+            ready={ready && onboardingLoaded}
+            skipFlag={!!resumeInfo || historyIndex.length > 0}
+          />
+        ) : <Header status={mode === "host" ? status : null} />}
 
         {mode === null && onboardingLoaded && ready && !onboardingSeen["intro-tour"] && !savedSession && historyIndex.length === 0 && (
           <IntroTour onDone={() => dismissOnboarding("intro-tour")} />
@@ -2068,7 +2097,7 @@ const LOGO_STARS = [
 // Splits a title into per-letter spans so each letter can bounce on its own
 // delay. Words stay together (no break inside a word); the letters are
 // hidden from assistive tech and the full text is read once instead.
-function BounceText({ text }) {
+function BounceText({ text, base = 0 }) {
   let n = 0;
   const words = text.split(" ");
   return (
@@ -2091,7 +2120,7 @@ function BounceText({ text }) {
             {wi > 0 ? " " : null}
             <span style={{ display: "inline-block", whiteSpace: "nowrap" }}>
               {word.split("").map((ch) => {
-                const delay = `${(n++ * 0.07).toFixed(2)}s`;
+                const delay = `${(base + n++ * 0.07).toFixed(2)}s`;
                 return (
                   <span key={n} className="ma-letter" style={{ animationDelay: delay }}>
                     {ch}
@@ -2106,7 +2135,7 @@ function BounceText({ text }) {
   );
 }
 
-function LogoSparkles({ children }) {
+function LogoSparkles({ children, base = 0 }) {
   return (
     <span className="relative inline-block">
       {children}
@@ -2123,7 +2152,7 @@ function LogoSparkles({ children }) {
             right: s.right,
             top: s.top,
             bottom: s.bottom,
-            animationDelay: s.delay,
+            animationDelay: `${(base + parseFloat(s.delay)).toFixed(2)}s`,
             animationDuration: `${4.8 + i * 0.3}s`,
           }}
         >
@@ -2380,7 +2409,34 @@ function HelpPanel({ onClose }) {
 }
 
 // First thing anyone sees. Replaces <Header> while no role is picked yet.
-function LandingHero() {
+// A first-time visitor gets the finish-line flag wipe on the title once per
+// page load; anyone with a saved game or race history, and anyone who prefers
+// reduced motion, sees the title straight away.
+let maFlagPlayed = false;
+
+function LandingHero({ ready = true, skipFlag = false }) {
+  // "wait" keeps the title hidden until we know whether to play the wipe, so
+  // returning players never see it flash and then disappear.
+  const [phase, setPhase] = useState("wait");
+  useEffect(() => {
+    if (phase !== "wait") return undefined;
+    const decide = () => {
+      if (skipFlag || maFlagPlayed || prefersReducedMotion()) {
+        setPhase("skip");
+      } else {
+        maFlagPlayed = true;
+        setPhase("play");
+      }
+    };
+    if (ready) {
+      decide();
+      return undefined;
+    }
+    const t = setTimeout(decide, 900);
+    return () => clearTimeout(t);
+  }, [ready, skipFlag, phase]);
+  const play = phase === "play";
+  const base = play ? 1.6 : 0;
   return (
     <div className="pt-2 pb-4 text-center">
       <div className="flex items-center justify-center gap-2 mb-2">
@@ -2390,12 +2446,18 @@ function LandingHero() {
         </span>
         <Sparkles size={16} color="var(--yellow)" />
       </div>
-      <LogoSparkles>
+      <LogoSparkles base={base}>
         <h1
-          className="font-display comic-title lp-title text-5xl sm:text-6xl inline-block"
+          className="relative font-display comic-title lp-title text-5xl sm:text-6xl inline-block"
           style={{ color: "#FFFCF5", letterSpacing: "0.01em", transform: "rotate(-2deg)" }}
         >
-          <BounceText text="Magical Athlete" />
+          <span
+            className={play ? "ma-reveal" : undefined}
+            style={{ display: "inline-block", opacity: phase === "wait" ? 0 : 1 }}
+          >
+            <BounceText text="Magical Athlete" base={base} />
+          </span>
+          {play && <span className="ma-flag" aria-hidden="true" />}
         </h1>
       </LogoSparkles>
       <p className="font-mono text-xs mt-3 lp-rise" style={{ color: "var(--onBg)", animationDelay: "0.35s" }}>
