@@ -1721,26 +1721,27 @@ export default function App() {
         /* Draft roll-off: a hard cup-shake while faces flicker, then a
            squash-and-bounce landing when the real result is revealed. */
         @keyframes diceShake {
-          0%   { transform: translate(0, 0) rotate(0deg); }
-          10%  { transform: translate(-5px, -7px) rotate(-16deg); }
-          20%  { transform: translate(6px, 3px) rotate(14deg); }
-          30%  { transform: translate(-4px, -9px) rotate(-10deg) scale(1.08); }
-          40%  { transform: translate(7px, 2px) rotate(18deg); }
-          50%  { transform: translate(-6px, -5px) rotate(-14deg) scale(1.1); }
-          60%  { transform: translate(5px, 4px) rotate(10deg); }
-          70%  { transform: translate(-3px, -8px) rotate(-18deg) scale(1.06); }
-          80%  { transform: translate(6px, 1px) rotate(12deg); }
-          90%  { transform: translate(-2px, -4px) rotate(-6deg); }
-          100% { transform: translate(0, 0) rotate(0deg); }
+          0%   { transform: translate(0, 0) rotate(0deg) scale(1); }
+          8%   { transform: translate(-6px, -10px) rotate(-22deg) scale(1.12); }
+          18%  { transform: translate(7px, 2px) rotate(20deg) scale(1.04); }
+          30%  { transform: translate(-5px, -8px) rotate(-16deg) scale(1.08); }
+          42%  { transform: translate(5px, 1px) rotate(12deg) scale(1.02); }
+          55%  { transform: translate(-3px, -5px) rotate(-9deg) scale(1.04); }
+          68%  { transform: translate(2px, 0) rotate(6deg) scale(1); }
+          80%  { transform: translate(-1px, -2px) rotate(-3deg) scale(1.01); }
+          90%  { transform: translate(0, 0) rotate(1deg) scale(1); }
+          100% { transform: translate(0, 0) rotate(0deg) scale(1); }
         }
-        .dice-shake { animation: diceShake 0.42s linear infinite; }
+        /* One shake that decays to a dead stop (ends a little before the face
+           is revealed), so the reveal never cuts in mid-shake. */
+        .dice-shake { animation: diceShake 1s ease-in-out both; }
         @keyframes diceLand {
-          0%   { transform: scale(1.45) rotate(-14deg); box-shadow: 0 0 0 0 var(--highlight); }
-          45%  { transform: scale(0.88) rotate(5deg); }
-          70%  { transform: scale(1.08) rotate(-2deg); box-shadow: 0 0 0 9px transparent; }
+          0%   { transform: scale(1) rotate(0deg); }
+          35%  { transform: scale(1.14) rotate(-3deg); }
+          65%  { transform: scale(0.97) rotate(1deg); }
           100% { transform: scale(1) rotate(0deg); }
         }
-        .dice-land { animation: diceLand 0.5s cubic-bezier(0.2, 0.8, 0.3, 1) both; }
+        .dice-land { animation: diceLand 0.4s cubic-bezier(0.2, 0.8, 0.3, 1) both; }
 
         /* Landing screen */
         @keyframes lpTitleDrop {
@@ -4019,7 +4020,7 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
     setTieGroup(null);
   };
 
-  const ROLL_ANIM_MS = 1100;
+  const ROLL_ANIM_MS = 1100; // CSS shake is 1000ms, so the die is at rest before the reveal
 
   const rollFor = (seatIdx) => {
     if (rolls[seatIdx] != null || rollTimers.current[seatIdx]) return;
@@ -4052,7 +4053,7 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
       lastFace = face;
       setRollingFaces((prev) => ({ ...prev, [seatIdx]: face }));
       // Faces flicker fast, then slow down as the die "settles".
-      delay = Math.min(delay * 1.1, 190);
+      delay = Math.min(delay * 1.12, 170);
       rollTimers.current[seatIdx] = setTimeout(step, delay);
     };
     step();
@@ -4437,8 +4438,9 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
             return (
             <div
               key={seat}
-              className="flex items-center justify-between px-3 py-2 rounded-lg transition-colors"
+              className="flex items-center justify-between px-3 py-2 rounded-lg"
               style={{
+                transition: "background-color 300ms ease-out",
                 background: isTop ? "var(--highlight)" : "var(--paper)",
                 minHeight: rollMode === "app" ? 64 : undefined,
               }}
@@ -4463,16 +4465,28 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
                   role="status"
                   aria-label={isRolling ? `${labelFor(seat)} is rolling` : `${labelFor(seat)} rolled ${rolls[seat]}`}
                 >
-                  {isTop && (
-                    <span className="text-xs font-mono font-bold" style={{ color: "var(--red)" }}>
-                      {topCount > 1 ? "TIE" : "FIRST"}
-                    </span>
-                  )}
-                  {!isRolling && (
-                    <span className="font-mono font-bold text-lg" style={{ color: "var(--red)" }}>
-                      {rolls[seat]}
-                    </span>
-                  )}
+                  <span
+                    className="text-xs font-mono font-bold text-right"
+                    style={{
+                      color: "var(--red)",
+                      minWidth: 34,
+                      opacity: isTop && !isRolling ? 1 : 0,
+                      transition: "opacity 250ms ease-out",
+                    }}
+                  >
+                    {topCount > 1 ? "TIE" : "FIRST"}
+                  </span>
+                  <span
+                    className="font-mono font-bold text-lg text-center"
+                    style={{
+                      color: "var(--red)",
+                      minWidth: 14,
+                      opacity: isRolling ? 0 : 1,
+                      transition: "opacity 250ms ease-out 120ms",
+                    }}
+                  >
+                    {rolls[seat]}
+                  </span>
                   <DieFace
                     value={isRolling ? rollingFaces[seat] : rolls[seat]}
                     size={48}
