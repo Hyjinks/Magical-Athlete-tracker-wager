@@ -226,8 +226,7 @@ const WILD_WILDS_SPACES = {
   26: { type: "trip" },
 };
 
-// The effect on a space for the chosen track, or null. Mild Mile and custom
-// tracks have none.
+// The effect on a space for the chosen track, or null. Mild Mile has none.
 const spaceEffectFor = (trackName, position) =>
   trackName === "wild" ? WILD_WILDS_SPACES[position] || null : null;
 
@@ -695,8 +694,8 @@ export default function App() {
   };
 
   const [status, setStatus] = useState("setup"); // setup | racing | finished
-  const [trackLength, setTrackLength] = useState(STANDARD_TRACK_LENGTH);
-  const [trackName, setTrackName] = useState("mild"); // "mild" | "wild" | "custom"
+  const trackLength = STANDARD_TRACK_LENGTH; // both boards are 30 spaces
+  const [trackName, setTrackName] = useState("mild"); // "mild" | "wild"
   const [racers, setRacers] = useState([emptyRacer(0), emptyRacer(1)]);
 
   // Two racers should never share a colour while the roster is being set up
@@ -766,14 +765,8 @@ export default function App() {
         if (Array.isArray(s.moveHistory)) setMoveHistory(s.moveHistory);
         if (s.odds && typeof s.odds === "object") setOdds(s.odds);
         if (typeof s.status === "string") setStatus(s.status);
-        // Standard track (30 spaces) unless Custom was explicitly chosen.
-        if (s.trackName === "custom" && typeof s.trackLength === "number") {
-          setTrackName("custom");
-          setTrackLength(s.trackLength);
-        } else {
-          setTrackName(s.trackName === "wild" ? "wild" : "mild");
-          setTrackLength(STANDARD_TRACK_LENGTH);
-        }
+        // Old saves with a custom length fall back to Mild Mile.
+        setTrackName(s.trackName === "wild" ? "wild" : "mild");
         if (typeof s.savedThisRace === "boolean") setSavedThisRace(s.savedThisRace);
         if (typeof s.goldPoints === "string") setGoldPoints(s.goldPoints);
         if (typeof s.silverPoints === "string") setSilverPoints(s.silverPoints);
@@ -1314,13 +1307,9 @@ export default function App() {
       return;
     }
     // Rulebook: the board is flipped after each race (Mild, Wild, Mild, Wild).
-    // Custom-length tracks are the host's own house rule, so leave those alone.
-    if (trackName !== "custom") {
-      const next = trackName === "wild" ? "mild" : "wild";
-      setTrackName(next);
-      setTrackLength(STANDARD_TRACK_LENGTH);
-      updateHouseRule("bronzeEnabled", next === "wild");
-    }
+    const next = trackName === "wild" ? "mild" : "wild";
+    setTrackName(next);
+    updateHouseRule("bronzeEnabled", next === "wild");
   };
 
   // Before a race is retired, note which drafted racers each player just used
@@ -2020,7 +2009,6 @@ export default function App() {
                 updateRacer={updateRacer}
                 removeRacer={removeRacer}
                 trackLength={trackLength}
-                setTrackLength={setTrackLength}
                 trackName={trackName}
                 setTrackName={setTrackName}
                 updateHouseRule={updateHouseRule}
@@ -4852,7 +4840,6 @@ function SetupTab({
   updateRacer,
   removeRacer,
   trackLength,
-  setTrackLength,
   trackName = "mild",
   setTrackName = () => {},
   updateHouseRule = () => {},
@@ -4963,7 +4950,6 @@ function SetupTab({
                 disabled={locked}
                 onClick={() => {
                   setTrackName(id);
-                  setTrackLength(STANDARD_TRACK_LENGTH);
                   updateHouseRule("bronzeEnabled", id === "wild");
                 }}
                 className="rounded-lg px-3 py-2 text-left"
@@ -4980,42 +4966,11 @@ function SetupTab({
             );
           })}
         </div>
-        <button
-          type="button"
-          disabled={locked}
-          onClick={() => {
-            if (trackName === "custom") {
-              setTrackName("mild");
-              setTrackLength(STANDARD_TRACK_LENGTH);
-              updateHouseRule("bronzeEnabled", false);
-            } else setTrackName("custom");
-          }}
-          className="mt-2 text-xs font-mono underline"
-          style={{ color: "var(--muted)" }}
-        >
-          {trackName === "custom" ? "Use a standard track" : "Custom length…"}
-        </button>
-        {gameSession && gameSession.raceNumber > 1 && trackName !== "custom" && (
+        {gameSession && gameSession.raceNumber > 1 && (
           <p className="text-xs mt-2" style={{ color: "var(--muted)" }}>
             Board flipped after the last race — Race {gameSession.raceNumber} is on{" "}
             {trackName === "wild" ? "Wild Wilds" : "Mild Mile"}.
           </p>
-        )}
-        {trackName === "custom" && (
-          <div className="flex items-center gap-3 mt-2">
-            <input
-              type="range"
-              min="10"
-              max="60"
-              value={trackLength}
-              disabled={locked}
-              onChange={(e) => setTrackLength(parseInt(e.target.value))}
-              className="flex-1"
-            />
-            <span className="font-mono font-semibold text-sm" style={{ color: "var(--red)" }}>
-              {trackLength} spaces
-            </span>
-          </div>
         )}
       </Card>
 
