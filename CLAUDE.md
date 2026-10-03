@@ -1,0 +1,89 @@
+# Magical Athlete Tracker
+
+Race tracker, betting and draft companion for the Magical Athlete board game.
+Mobile-first: it's used on phones at the table.
+
+## Source of truth
+
+- **`magical-athlete-tracker.jsx` in this repo is the app.** One file, React 18,
+  Tailwind classes, lucide-react icons, storage through `window.storage`.
+- The live app is a claude.ai artifact: https://claude.ai/artifact/7NwzKSA9UdiRtRmhZ7z47U
+  (the same artifact also appears as `claude.ai/code/artifact/33a756bd-…`).
+  It only changes when someone republishes it.
+- Stale copies — don't build from them or copy code back from them:
+  `magical-athlete-tracker.zip` in this repo, and the `magical-athlete-tracker.jsx`,
+  `App.jsx`, `package.json` etc. uploaded to the claude.ai Project (the July Vite version).
+
+## Every change: the checklist
+
+1. Edit `magical-athlete-tracker.jsx` only.
+2. `npm run check` — lint, build, smoke test. All three must pass.
+   - Lint errors block the build. Warnings are allowed but read them.
+3. Look at the phone-width screenshots in `test-results/` for any tab you touched
+   (`setup-*` before a race, `race-*` mid-race — only Track and Dice open mid-race).
+   Google Fonts are stubbed in the test, so headings show a fallback font there.
+4. Publish `dist/magical-athlete.html` with the Artifact tool, passing the URL above
+   so it updates in place (a new URL would lose people's saved games).
+5. Commit and push to `main` (`git fetch origin main && git rebase origin/main` first).
+6. For anything about feel — animations, timing, layout on a real phone — tell Adam
+   it was checked headless only and ask him to try it on his phone.
+
+**Never hand-edit the published artifact or `dist/`.** That's how the draft-chips
+syntax error took the live app down. Fix the source and rebuild.
+
+## Setup in a fresh session
+
+```bash
+npm install                       # once per session
+npx playwright install chromium   # only if the smoke test can't find a browser
+npm run check
+```
+
+## Gotchas (learned the hard way)
+
+- **Missing imports pass the build.** esbuild treats undefined names as globals, so a
+  missing icon import only shows up as a crash on a phone. ESLint `no-undef` /
+  `react/jsx-no-undef` is what catches it — that's why the build runs lint first.
+  Icons passed as props (`icon={Trophy}`) still need importing.
+- **iOS input zoom.** Any `<input>`, `<select>` or `<textarea>` with a font under 16px
+  (`text-sm`, `text-xs`) makes iPhones zoom in when tapped. The smoke test lists
+  these as a known issue; once fixed, set `STRICT_INPUT_FONT = true` in
+  `tests/smoke.mjs` so it can't come back.
+- **48px touch targets.** A global rule makes every button at least 48×48px. For small
+  chips and pills, keep the button as the 48px hit area and draw the visible shape on
+  an inner element (e.g. a 28px-high span, `items-center` on the row). For an icon
+  button inside a chip or row, use negative margins so the hit area doesn't grow the
+  row.
+- **Tailwind is generated fresh** from the source on every build
+  (`tailwind.config.cjs`), so any Tailwind class works. (Old advice to use inline
+  styles because the artifact's CSS was purged only applied to hand-patching the
+  artifact, which we no longer do.)
+- **Storage.** On claude.ai the host provides `window.storage`, which is what keeps
+  saved games and history. `scripts/artifact/entry.jsx` only adds a localStorage
+  fallback for local runs (keys `ma:` personal, `ma-s:` shared). Shared keys are
+  device-local in that fallback, so spectating across phones can't be tested locally.
+- **First-visit effects** (the landing flag wipe) are skipped for anyone with saved
+  games. Tapping the title replays it.
+- **Boards.** Both Mild Mile and Wild Wilds are 30 spaces (Start = 0, finish = 30).
+  Wild Wilds effect spaces live in `WILD_WILDS_SPACES` and were checked against the
+  physical board: stars 1 and 13; trips 5, 17, 26; arrows +3 at 7, +1 at 11, −4 at 16,
+  +2 at 23, −2 at 24.
+- **Animations** must respect `prefers-reduced-motion`.
+
+## Layout
+
+```
+magical-athlete-tracker.jsx   the app
+scripts/build-artifact.mjs    the only way to build the artifact → dist/magical-athlete.html
+scripts/artifact/entry.jsx    mounts the app, storage fallback for local runs
+scripts/artifact/styles.css   Tailwind input + page base styles
+tests/smoke.mjs               headless phone-size play-through (Playwright)
+```
+
+## Known issues (October 2026 review)
+
+- iOS zoom on inputs; no wake lock; tabs at the top and little safe-area padding —
+  the August mobile fixes were made in the old Vite copy and never ported here.
+- Undo doesn't step back across turns or restore a trip already skipped.
+- The spectator snapshot doesn't include the track or who is tripped.
+- `App()` is ~1,600 lines; the file is ~7,200.

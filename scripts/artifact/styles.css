@@ -1,0 +1,21 @@
+/* Page-level CSS for the published artifact. Tailwind scans
+   magical-athlete-tracker.jsx (see tailwind.config.cjs), so every class used in
+   the app is generated fresh on each build — nothing is reused from an old
+   artifact, and new classes never go missing.
+   The app's own design CSS (fonts, colours, the 48px touch-target rule) lives
+   in the <style> block inside magical-athlete-tracker.jsx. */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  -webkit-tap-highlight-color: transparent;
+}

@@ -1,0 +1,62 @@
+{
+  "root": true,
+  "parserOptions": {
+    "ecmaVersion": 2022,
+    "sourceType": "module",
+    "ecmaFeatures": {
+      "jsx": true
+    }
+  },
+  "env": {
+    "browser": true,
+    "es2022": true
+  },
+  "plugins": [
+    "react",
+    "react-hooks"
+  ],
+  "settings": {
+    "react": {
+      "version": "18"
+    }
+  },
+  "rules": {
+    "no-undef": "error",
+    "react/jsx-no-undef": "error",
+    "react/jsx-uses-vars": "error",
+    "react/jsx-uses-react": "error",
+    "react/jsx-key": "error",
+    "react-hooks/rules-of-hooks": "error",
+    "react-hooks/exhaustive-deps": "warn",
+    "no-dupe-keys": "error",
+    "no-unreachable": "error",
+    "no-unused-vars": [
+      "warn",
+      {
+        "args": "none",
+        "varsIgnorePattern": "^_"
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": [
+        "scripts/**/*.mjs"
+      ],
+      "env": {
+        "node": true,
+        "browser": false
+      }
+    },
+    {
+      "files": [
+        "tests/**/*.mjs"
+      ],
+      "env": {
+        "node": true,
+        "browser": true
+      },
+      "globals": {}
+    }
+  ]
+}
