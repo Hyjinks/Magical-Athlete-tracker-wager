@@ -14,8 +14,10 @@ Mobile-first: it's used on phones at the table.
   - **Hosted web app / PWA** (`npm run build:web` → `dist-web/`), deployed to Firebase
     Hosting at https://magical-athlete.web.app (Firebase project `magical-athlete`). This is what spectators without claude.ai accounts will use (the
     intended venue is a retirement-village game night). Setup and deploy:
-    `docs/DEPLOY.md`. Deploying needs Adam's Firebase login, or the GitHub Action
-    from DEPLOY.md Part C if he has set it up.
+    `docs/DEPLOY.md`. **Every push to `main` deploys it automatically** (GitHub
+    Action `.github/workflows/firebase-hosting-merge.yml`, about a minute); pull
+    requests get a preview link. Check runs with
+    `gh run list -R Hyjinks/Magical-Athlete-tracker-wager`.
 - Old versions, kept for reference only — never build from them or copy code back:
   `archive/vite-pwa-july-2026/` (the July installable-PWA version; see
   `archive/README.md`). Older versions of the app itself are in git history.
@@ -35,8 +37,7 @@ Mobile-first: it's used on phones at the table.
 4. Publish `dist/magical-athlete.html` with the Artifact tool, passing the URL above
    so it updates in place (a new URL would lose people's saved games).
 5. Commit and push to `main` (`git fetch origin main && git rebase origin/main` first).
-   The web app is redeployed from `main` (by Adam, or automatically if Part C of
-   `docs/DEPLOY.md` is set up) — say so when a change needs it.
+   That also redeploys the web app automatically; check the run succeeded.
 6. For anything about feel — animations, timing, layout on a real phone — tell Adam
    it was checked headless only and ask him to try it on his phone.
 
