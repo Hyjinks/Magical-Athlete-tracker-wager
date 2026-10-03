@@ -4878,19 +4878,24 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
               .filter((x) => x && x.name);
             return (
               <div key={seat} className="flex items-start gap-2 text-xs">
-                <span className="font-medium shrink-0 pt-1" style={{ color: "var(--muted)" }}>
+                {/* Every pill is 28px tall and centred on its line, so banked and
+                    tappable racers line up with each other and with the label. The
+                    tappable ones keep a 48px hit area via negative margins, without
+                    making their rows taller. */}
+                <span className="font-medium shrink-0 h-7 flex items-center" style={{ color: "var(--muted)" }}>
                   {labelFor(seat)}:
                 </span>
                 {banked.length === 0 && theirPicks.length === 0 ? (
-                  <span className="pt-1">—</span>
+                  <span className="h-7 flex items-center">—</span>
                 ) : (
-                  <div className="flex flex-wrap gap-1">
+                  <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
                     {/* Banked racers from earlier lines — locked, not rewindable */}
                     {banked.map((name, k) => (
                       <span
                         key={`b${k}`}
-                        className="px-2 py-0.5 rounded-full"
-                        style={{ background: "var(--highlight)", color: "var(--ink)" }}
+                        data-pick-chip
+                        className="h-7 px-2 inline-flex items-center rounded-full border"
+                        style={{ background: "var(--highlight)", borderColor: "transparent", color: "var(--ink)" }}
                       >
                         {name}
                       </span>
@@ -4900,11 +4905,17 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
                       <button
                         key={p.slot}
                         onClick={() => undoPickAt(p.slot)}
-                        className="px-2 py-0.5 rounded-full border"
-                        style={{ background: "var(--paper)", borderColor: "var(--ink)", color: "var(--ink)" }}
+                        className="flex items-center -my-2.5"
+                        style={{ background: "transparent" }}
                         aria-label={`Redo draft from ${p.name}`}
                       >
+                        <span
+                          data-pick-chip
+                          className="h-7 px-2 inline-flex items-center rounded-full border"
+                          style={{ background: "var(--paper)", borderColor: "var(--ink)", color: "var(--ink)" }}
+                        >
                         {p.name} ✕
+                        </span>
                       </button>
                     ))}
                   </div>

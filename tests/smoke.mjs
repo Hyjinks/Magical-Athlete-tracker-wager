@@ -372,6 +372,79 @@ async function suite(target) {
   }
 
   // ---------------------------------------------------------------------------
+  console.log("\nDraft line 2: picked racers line up");
+  {
+    // The pills under each player (racers banked from line 1, and this line's
+    // tappable picks) once came out misaligned — text stuck to the top of
+    // stretched pills. Drive a 2-player draft into line 2 and measure them.
+    const { ctx, page, errors } = await openApp();
+    await startHosting(page);
+    await tap(page, /^Run a draft$/, 600);
+    await tap(page, /^Got it$/).catch(() => {});
+    await tap(page, /^2-player variant/);
+    await tap(page, /^Roll off/, 600);
+    // Two dice tie often: confirming a tie asks the tied players to roll
+    // again, so roll and confirm until the card entry appears.
+    for (let attempt = 0; attempt < 8; attempt++) {
+      while (await hasButton(page, /^Roll$/)) await tap(page, /^Roll$/, 50);
+      await page.waitForTimeout(3200);
+      await tap(page, /^(Confirm order|Resolve tie)$/, 600);
+      if (await page.locator('input[placeholder="Card 1"]').count()) break;
+    }
+    const lines = [
+      ["Alchemist", "Baba Yaga", "Blimp", "Coach", "Cheerleader", "Banana", "Centaur", "Copycat"],
+      ["Duelist", "Heckler", "Genius", "Legs", "Lovable Loser", "Huge Baby", "Gunk", "Flip Flop"],
+    ];
+    for (const [li, names] of lines.entries()) {
+      await tap(page, /^Got it$/).catch(() => {});
+      for (let i = 0; i < 8; i++) {
+        await page.locator(`input[placeholder="Card ${i + 1}"]`).fill(names[i]);
+        await page.keyboard.press("Escape");
+      }
+      await tap(page, /^Start picking$/, 500);
+      await tap(page, /^Got it$/).catch(() => {});
+      for (let k = 0; k < (li === 0 ? 8 : 3); k++) {
+        const texts = await page.locator("button").evaluateAll((els) => els.map((el) => el.innerText.trim()));
+        const pick = texts.find((t) => names.includes(t));
+        await tap(page, new RegExp(`^${pick}$`), 300);
+      }
+    }
+    check(/Line 2\/2/.test(await bodyText(page)), "draft reaches line 2");
+    const pills = await page.evaluate(() =>
+      // The pills are the items in each player's row, under the "redo the
+      // draft" hint (for a button, the pill drawn inside it if there is one).
+      [...document.querySelectorAll("p")]
+        .filter((p) => /redo the draft from that pick/.test(p.innerText))
+        .flatMap((p) => [...p.nextElementSibling.querySelectorAll(":scope > div > div > *")])
+        .map((item) => (item.tagName === "BUTTON" && item.firstElementChild?.tagName === "SPAN" ? item.firstElementChild : item))
+        .map((el) => {
+        const r = el.getBoundingClientRect();
+        // Where the text actually sits inside the pill.
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const t = range.getBoundingClientRect();
+        return { name: el.innerText.trim(), h: r.height, mid: r.top + r.height / 2, textMid: t.top + t.height / 2 };
+      })
+    );
+    check(pills.length === 11, `8 banked and 3 current picks all shown (${pills.length})`);
+    const tall = pills.filter((p) => p.h > 32);
+    check(tall.length === 0, `pills keep their size${tall.length ? ` — stretched: ${tall.map((p) => `${p.name} ${p.h}px`).join(", ")}` : ""}`);
+    const offCentre = pills.filter((p) => Math.abs(p.textMid - p.mid) > 3);
+    check(offCentre.length === 0, `names are centred in their pills${offCentre.length ? ` — off: ${offCentre.map((p) => p.name).join(", ")}` : ""}`);
+    // Pills on the same line share a centre line (banked next to tappable).
+    const rows = new Map();
+    for (const p of pills) {
+      const key = [...rows.keys()].find((k) => Math.abs(k - p.mid) < 10) ?? p.mid;
+      rows.set(key, [...(rows.get(key) || []), p]);
+    }
+    const ragged = [...rows.values()].filter((row) => Math.max(...row.map((p) => p.mid)) - Math.min(...row.map((p) => p.mid)) > 2);
+    check(ragged.length === 0, "pills on the same line are level with each other");
+    await page.screenshot({ path: join(SHOTS, "draft-line2.png") });
+    check(errors.length === 0, `no errors${errors.length ? `: ${errors.join(" / ")}` : ""}`);
+    await ctx.close();
+  }
+
+  // ---------------------------------------------------------------------------
   console.log("\nSpectator joins with a code and bets from their own phone");
   {
     const { ctx, page: host, errors } = await openApp();
