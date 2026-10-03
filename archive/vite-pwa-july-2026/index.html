@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Magical Athlete Tracker</title>
+    <meta name="description" content="Race tracker, betting, and draft assistant for the Magical Athlete board game." />
+
+    <!-- Theme color (address bar tint on Android Chrome) -->
+    <meta name="theme-color" content="#E5402A" />
+
+    <!-- Standard PWA icons (also declared in manifest.json) -->
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+
+    <!--
+      iOS Safari does not read manifest.json for install behavior the way
+      Android Chrome does — it needs these explicit tags, or "Add to Home
+      Screen" falls back to a plain browser-shortcut icon and no standalone
+      chrome. This block is the iOS equivalent of manifest.json.
+    -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Magical Athlete" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

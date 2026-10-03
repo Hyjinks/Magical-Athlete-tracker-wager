@@ -10,9 +10,12 @@ Mobile-first: it's used on phones at the table.
 - The live app is a claude.ai artifact: https://claude.ai/artifact/7NwzKSA9UdiRtRmhZ7z47U
   (the same artifact also appears as `claude.ai/code/artifact/33a756bd-…`).
   It only changes when someone republishes it.
-- Stale copies — don't build from them or copy code back from them:
-  `magical-athlete-tracker.zip` in this repo, and the `magical-athlete-tracker.jsx`,
-  `App.jsx`, `package.json` etc. uploaded to the claude.ai Project (the July Vite version).
+- Old versions, kept for reference only — never build from them or copy code back:
+  `archive/vite-pwa-july-2026/` (the July installable-PWA version; see
+  `archive/README.md`). Older versions of the app itself are in git history.
+- The claude.ai Project gets this repo through its GitHub sync (press sync in the
+  Project to refresh it). Don't upload copies of repo files to the Project by hand —
+  they go stale and mislead later chats.
 
 ## Every change: the checklist
 
@@ -92,6 +95,7 @@ scripts/build-artifact.mjs    the only way to build the artifact → dist/magica
 scripts/artifact/entry.jsx    mounts the app, storage fallback for local runs
 scripts/artifact/styles.css   Tailwind input + page base styles
 tests/smoke.mjs               headless phone-size play-through (Playwright)
+archive/                      old versions, reference only (not built or linted)
 ```
 
 ## Known issues (October 2026 review)

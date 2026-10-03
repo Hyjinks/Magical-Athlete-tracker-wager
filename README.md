@@ -17,4 +17,5 @@ npm run check   # lint → build dist/magical-athlete.html → headless smoke te
 - `npm run build` — builds the single-file page in `dist/`
 - `npm test` — plays through a race and the draft at phone size; screenshots go to `test-results/`
 
-See `CLAUDE.md` for the full workflow and the gotchas behind it.
+See `CLAUDE.md` for the full workflow and the gotchas behind it. Old versions are in
+`archive/` (reference only).
