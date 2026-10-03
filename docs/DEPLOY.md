@@ -18,8 +18,7 @@ This is a one-off setup. It needs your Google login, so it's yours to do.
 6. Leave the project on the free **Spark** plan. Hosting and Firestore both fit
    comfortably in the free tier for game nights.
 
-That's all for now. (Firestore, for spectators, is the next step; you'll get
-separate instructions for it.)
+That's all for now. Firestore (for spectators) is Part D.
 
 ## Part B — first deploy (from your computer, about 10 minutes)
 
@@ -84,4 +83,44 @@ Actions workflow and the secret it needs. Commit the workflow file it creates.
 
 Note: saved games and history live on each phone, separately for the web app and
 the claude.ai artifact, so a game started in one doesn't show up in the other.
-Spectators joining from other phones needs the Firestore step that comes next.
+
+## Part D — spectators on other phones (Firestore)
+
+Spectators' phones talk to the host's phone through Cloud Firestore. Nobody
+signs in: each phone gets an invisible anonymous account.
+
+One-off, in the Firebase console (done for `magical-athlete`):
+
+1. **Build → Authentication → Get started → Sign-in method → Anonymous →
+   Enable → Save.** Turn on automatic clean-up of anonymous accounts.
+2. **Build → Firestore Database → Create database**, location
+   `australia-southeast1`, start in production mode.
+3. **Project settings → Your apps → Web app**; its config is in
+   `src/firebase-config.js`.
+
+Then, from your computer, deploy the security rules (they decide who can read
+and change what; until they're deployed, spectator betting can't start):
+
+```bash
+git pull
+npx firebase-tools deploy --only firestore:rules
+```
+
+Run that again whenever `firestore.rules` changes. Pushing to `main` only
+redeploys the app, not the rules.
+
+### Two-phone test
+
+1. Phone A: open the app → Host a game → add two or three racers → Betting →
+   **Post odds** → **Enable spectator betting**. Note the 4-digit code.
+2. Phone B (on mobile data, not the same Wi-Fi, to be sure): open the app →
+   Join with a code → enter a name and the code → Join. It should show
+   "Betting open" and the odds.
+3. Phone B: pick a racer, an amount, **Place bet**. Within about 5 seconds the
+   bet appears on phone A under its spectators.
+4. Phone A: start the race and move a racer. Phone B follows along.
+5. Phone A: **Stop hosting spectator betting**. Phone B says "Host closed
+   betting".
+
+If step 1 says "Couldn't start spectator betting", the rules probably aren't
+deployed, or anonymous sign-in isn't enabled.

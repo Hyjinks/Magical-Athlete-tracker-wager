@@ -50,5 +50,9 @@ export default defineConfig({
     emptyOutDir: true,
     // Older iPhones are expected at the table.
     target: ["es2020", "safari15"],
+    // Firestore is one ~560 KB chunk. It's only downloaded when spectator
+    // betting is used (see src/storage-shared-firebase.js), so it's not worth
+    // a warning on every build.
+    chunkSizeWarningLimit: 600,
   },
 });

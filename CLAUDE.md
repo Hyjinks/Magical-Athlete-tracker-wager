@@ -73,11 +73,22 @@ npm run check
   styles because the artifact's CSS was purged only applied to hand-patching the
   artifact, which we no longer do.)
 - **Storage.** The app only talks to `window.storage.get/set/delete/list(key, shared)`.
-  On claude.ai the host provides it. Everywhere else `src/storage-local.js` provides it
-  from localStorage (keys `ma:` personal, `ma-s:` shared). In the web app, shared keys
-  (join code `session-pin`, race snapshot `race:<token>`, bets `bet:<token>:<raceId>:<id>`)
-  are still device-local until the Firestore step — spectators on other phones can't
-  join yet.
+  On claude.ai the host provides it. In the web app (`src/main.jsx`) personal keys
+  go to localStorage (`src/storage-local.js`, keys `ma:`) and shared keys go to
+  Cloud Firestore (`src/storage-shared-firebase.js`, collection `shared`, one doc
+  per key: `{key, value, owner, updatedAt}`, anonymous sign-in, live listeners so
+  polling costs no reads; Firebase is only downloaded once a shared key is used).
+  Shared keys: `join:<4-digit code>` (one per game, claimed when spectator betting
+  starts), `race:<token>` (snapshot), `bet:<token>:<raceId>:<id>`. Tokens and ids
+  must stay alphanumeric — **`firestore.rules` only accepts those three key
+  patterns**, so a new shared key needs a rules change, deployed by Adam
+  (`npx firebase-tools deploy --only firestore:rules`; the GitHub Action only
+  deploys hosting). When sweeping a session, delete bets before the `race:`
+  doc — the rules let the host delete spectators' bets only while it owns that
+  doc. The rules can't be tested here (no emulator download); the smoke test
+  sets `window.__MA_SHARED_BACKEND__ = "local"` and uses two pages in one
+  browser context as host and spectator, and `tests/storage-shared.test.mjs`
+  checks the adapter against a fake Firestore.
 - **Service worker (web app).** It caches the whole app so it opens on patchy Wi-Fi,
   and updates itself the next time the app is opened. `firebase.json` stops
   `index.html` and `sw.js` being cached by the browser so updates are seen. The smoke
@@ -120,16 +131,20 @@ index.html, src/main.jsx      web app entry (Vite) → dist-web/
 vite.config.js                web build + PWA manifest and service worker
 public/icons/                 home-screen icons
 src/storage-local.js          window.storage from localStorage (both builds)
+src/storage-shared-firebase.js  shared keys → Firestore (web app only)
+src/firebase-config.js        Firebase web config (public by design)
+firestore.rules               who can read/write shared keys (deploy by hand)
 src/styles.css                Tailwind input + page base styles (both builds)
 firebase.json, docs/DEPLOY.md Firebase Hosting config and setup steps
 tests/smoke.mjs               headless phone-size play-through of both builds
+tests/storage-shared.test.mjs Firestore adapter against a fake Firestore
 archive/                      old versions, reference only (not built or linted)
 ```
 
 ## Known issues (October 2026 review)
 
 - The spectator snapshot doesn't include the track or who is tripped.
-- Spectators on other phones need the Firestore step (shared keys → Firestore, with
-  security rules and invisible anonymous sign-in), then QR-code joining and a larger,
+- Spectators on other phones: Firestore is wired up (web app only) but has not
+  yet had a real multi-phone test. Still to do: QR-code joining and a larger,
   simpler spectator screen for older users.
-- `App()` is ~1,600 lines; the file is ~7,200.
+- `App()` is ~1,600 lines; the file is ~7,300.

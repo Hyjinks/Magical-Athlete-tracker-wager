@@ -71,11 +71,23 @@ const browser = await chromium.launch();
 // Service workers are off by default: once installed, the web app's service
 // worker fetches Google Fonts itself, past the offline stub below. The
 // installable-app checks turn it on deliberately.
-async function openApp({ serviceWorkers = "block" } = {}) {
+// The web app keeps shared keys (join codes, race, bets) in Firestore. The test
+// has no internet, so by default it keeps them on the device instead
+// (sharedBackend "local"), and two pages in one context play host and
+// spectator. "firebase" runs the real Firestore code with Google's servers
+// unreachable, to check the app copes.
+async function openApp({ serviceWorkers = "block", sharedBackend = "local" } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, serviceWorkers });
   await ctx.route(/fonts\.(googleapis|gstatic)\.com/, (route) =>
     route.fulfill({ status: 200, contentType: "text/css", body: "" })
   );
+  // Firebase's servers (sign-in and Firestore) are unreachable in the test.
+  await ctx.route(/(firestore|identitytoolkit|securetoken|firebaseinstallations)\.googleapis\.com|firebaseapp\.com/, (route) =>
+    route.abort()
+  );
+  await ctx.addInitScript((backend) => {
+    window.__MA_SHARED_BACKEND__ = backend;
+  }, sharedBackend);
   // Stand-in Wake Lock API that records what the app asks for.
   await ctx.addInitScript(() => {
     window.__wakeLog = [];
@@ -90,16 +102,22 @@ async function openApp({ serviceWorkers = "block" } = {}) {
       },
     });
   });
-  const page = await ctx.newPage();
   const errors = [];
+  const page = await openPage(ctx, PAGE_URL, errors);
+  return { ctx, page, errors };
+}
+
+// Another page in the same context (shares the device's storage).
+async function openPage(ctx, url, errors) {
+  const page = await ctx.newPage();
   page.on("pageerror", (e) => errors.push(`page error: ${e.message}`));
   page.on("console", (m) => {
     if (m.type() === "error") errors.push(`console error: ${m.text()}`);
   });
-  await page.goto(PAGE_URL);
+  await page.goto(url);
   await page.waitForSelector("#root *", { timeout: 10000 });
   await page.waitForTimeout(400);
-  return { ctx, page, errors };
+  return page;
 }
 
 // Click the first button/label whose visible text matches `re`. Clicks are
@@ -350,6 +368,79 @@ async function suite(target) {
     check(values.length === 3 && values.every((v) => v >= 1 && v <= 6), `all three dice land on 1–6 (${values.join(", ")})`);
     await page.screenshot({ path: join(SHOTS, "draft-rolloff.png") });
     check(errors.length === 0, `no errors${errors.length ? `: ${errors.join(" / ")}` : ""}`);
+    await ctx.close();
+  }
+
+  // ---------------------------------------------------------------------------
+  console.log("\nSpectator joins with a code and bets from their own phone");
+  {
+    const { ctx, page: host, errors } = await openApp();
+    await startHosting(host);
+    await tap(host, /^Add racer$/);
+    const players = host.locator('input[placeholder="Who is racing?"]');
+    const names = host.locator('input[placeholder^="Racer"]');
+    for (const [i, [p, r]] of [["Adam", "Hare"], ["Ann", "Banana"], ["Ari", "Egg"]].entries()) {
+      await players.nth(i).fill(p);
+      await names.nth(i).fill(r);
+      await host.keyboard.press("Escape");
+    }
+    await tap(host, /^Betting$/, 400);
+    await tap(host, /Post odds/, 400);
+    await tap(host, /Enable spectator betting/, 800);
+    const pin = await host.evaluate(() => {
+      const b = [...document.querySelectorAll("button[aria-label^='Join code']")][0];
+      return b ? b.innerText.replace(/\D/g, "").slice(0, 4) : null;
+    });
+    check(/^\d{4}$/.test(pin || ""), `host gets a 4-digit join code (${pin})`);
+    const joinRecord = await host.evaluate((p) => localStorage.getItem(`ma-s:join:${p}`), pin);
+    check(!!joinRecord && JSON.parse(joinRecord).active === true, "the code is claimed in shared storage for this game only");
+
+    // A wrong code is turned away with a plain message
+    const spec = await openPage(ctx, `${PAGE_URL}${PAGE_URL.includes("?") ? "&" : "?"}join=${pin === "1234" ? "4321" : "1234"}`, errors);
+    await tap(spec, /^Skip$/).catch(() => {});
+    await spec.locator('input[placeholder="Your name"]').fill("Gran");
+    await tap(spec, /^Join$/, 600);
+    check(/no game with that code/i.test(await bodyText(spec)), "a wrong code says there's no game with that code");
+
+    await spec.locator('input[placeholder="4-digit code"]').fill(pin);
+    await tap(spec, /^Join$/, 1500);
+    check(/Betting open/i.test(await bodyText(spec)), "spectator joins and sees betting open");
+    await tap(spec, /^Got it$/).catch(() => {});
+    await tap(spec, /^Banana/, 150);
+    await tap(spec, /^10$/, 150);
+    await tap(spec, /^Place bet$/, 600);
+    check(/Your bets/i.test(await bodyText(spec)), "spectator's bet shows on their phone");
+    await spec.screenshot({ path: join(SHOTS, "spectator-bet.png") });
+
+    await host.waitForTimeout(4800); // the host checks for new bets every 4s
+    check(/Gran/.test(await bodyText(host)), "the spectator's bet reaches the host");
+
+    await tap(host, /Stop hosting spectator betting/, 800);
+    await spec.waitForTimeout(4500);
+    check(/Host closed betting/i.test(await bodyText(spec)), "spectator sees when the host stops spectator betting");
+    const after = await host.evaluate((p) => localStorage.getItem(`ma-s:join:${p}`), pin);
+    check(!!after && JSON.parse(after).active === false, "stopping frees the code for another game");
+
+    check(errors.length === 0, `no errors${errors.length ? `: ${errors.join(" / ")}` : ""}`);
+    await ctx.close();
+  }
+
+  if (target === "web") {
+    console.log("\nSpectator betting with no internet (real Firestore code)");
+    const { ctx, page, errors } = await openApp({ sharedBackend: "firebase" });
+    await startHosting(page);
+    await tap(page, /^Add racer$/);
+    await page.locator('input[placeholder^="Racer"]').nth(0).fill("Hare");
+    await page.locator('input[placeholder^="Racer"]').nth(1).fill("Egg");
+    await page.keyboard.press("Escape");
+    await tap(page, /^Betting$/, 400);
+    await tap(page, /Enable spectator betting/, 200);
+    await page.waitForFunction(() => /internet connection/.test(document.body.innerText), null, { timeout: 40000 }).catch(() => {});
+    check(/Couldn't start spectator betting/.test(await bodyText(page)), "with no connection, the host is told spectator betting couldn't start");
+    check(await hasButton(page, /Enable spectator betting/), "and can try again");
+    // Firebase logs its own network failures to the console; only app crashes count here.
+    const crashes = errors.filter((e) => e.startsWith("page error"));
+    check(crashes.length === 0, `no crashes${crashes.length ? `: ${crashes.join(" / ")}` : ""}`);
     await ctx.close();
   }
 

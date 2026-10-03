@@ -1,0 +1,88 @@
+rules_version = '2';
+
+// Security rules for the hosted web app's shared data.
+// Deploy with:  npx firebase-tools deploy --only firestore:rules
+//
+// Everything lives in one collection, `shared`, one document per app key
+// (see src/storage-shared-firebase.js):
+//
+//   join:<4 digits>             which game a join code points at   written by the host
+//   race:<token>                live race snapshot                 written by the host
+//   bet:<token>:<raceId>:<id>   one bet                            written by whoever placed it
+//
+// Every phone signs in anonymously and invisibly. `owner` is the Firebase user
+// that last wrote the document, and only they can change it — with two
+// exceptions: a join code that's been switched off (or left untouched for
+// 12 hours) can be claimed by a new game, and a host can clear the bets
+// placed on their own game.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /shared/{docId} {
+
+      function signedIn() {
+        return request.auth != null;
+      }
+
+      function isJoin(id) {
+        return id.matches('^join:[0-9]{4}$');
+      }
+      function isRace(id) {
+        return id.matches('^race:[A-Za-z0-9]{1,40}$');
+      }
+      function isBet(id) {
+        return id.matches('^bet:[A-Za-z0-9]{1,40}:[A-Za-z0-9]{1,40}:[A-Za-z0-9]{1,40}$');
+      }
+
+      // The race document that a bet's key points at.
+      function raceOf(id) {
+        return /databases/$(database)/documents/shared/$('race:' + id.split(':')[1]);
+      }
+
+      function validShape() {
+        let d = request.resource.data;
+        return d.keys().hasOnly(['key', 'value', 'owner', 'updatedAt'])
+          && d.keys().hasAll(['key', 'value', 'owner', 'updatedAt'])
+          && d.key == docId
+          && d.value is string
+          && d.value.size() < 50000
+          && d.owner == request.auth.uid
+          && d.updatedAt == request.time;
+      }
+
+      function ownsIt() {
+        return resource.data.owner == request.auth.uid;
+      }
+
+      // A join code another game can take over: switched off, or abandoned.
+      function joinIsFree() {
+        return resource.data.value.matches('.*"active":false.*')
+          || request.time > resource.data.updatedAt + duration.value(12, 'h');
+      }
+
+      // Anyone at the table (any signed-in phone) can read: the data is a race
+      // and some bets, and the doc IDs include random tokens.
+      allow read: if signedIn();
+
+      allow create: if signedIn() && validShape()
+        && (isJoin(docId)
+            || isRace(docId)
+            || (isBet(docId) && exists(raceOf(docId))));
+
+      allow update: if signedIn() && validShape()
+        && (isJoin(docId) || isRace(docId) || isBet(docId))
+        && (ownsIt() || (isJoin(docId) && joinIsFree()));
+
+      allow delete: if signedIn()
+        && (ownsIt()
+            || (isBet(docId)
+                && exists(raceOf(docId))
+                && get(raceOf(docId)).data.owner == request.auth.uid));
+    }
+
+    // Nothing else exists; deny by default.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

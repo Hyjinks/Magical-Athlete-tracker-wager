@@ -694,43 +694,74 @@ export default function App() {
     }
   }, []);
 
-  const enableSpectatorBetting = async () => {
-    // Starting a fresh session — sweep the previous token's leftovers (its
-    // snapshot and any bets under it) rather than abandoning them.
-    if (sessionToken) {
-      clearSharedUnder(`bet:${sessionToken}:`);
-      window.storage.delete(`race:${sessionToken}`, true).catch(() => {});
+  // Spectators find a game by its 4-digit code: each game has its own shared
+  // record `join:<code>` pointing at its session token, so two hosts (two
+  // tables, or last week's game) never fight over one code.
+  const [specBusy, setSpecBusy] = useState(false);
+  const [specError, setSpecError] = useState("");
+
+  // Sweep a finished session's shared data. Bets go first and the snapshot
+  // last: in the web app, the rules let the host delete spectators' bets
+  // only while the host still owns that session's snapshot.
+  const endSharedSession = useCallback(
+    async (token, pin) => {
+      if (pin) {
+        await window.storage
+          .set(`join:${pin}`, JSON.stringify({ pin, token, active: false }), true)
+          .catch(() => {});
+      }
+      if (!token) return;
+      await clearSharedUnder(`bet:${token}:`);
+      await window.storage.delete(`race:${token}`, true).catch(() => {});
+    },
+    [clearSharedUnder]
+  );
+
+  // Picks a code nobody else is using right now and claims it. Returns the
+  // code, or null if shared storage can't be reached.
+  const claimJoinCode = async (token) => {
+    for (let i = 0; i < 6; i++) {
+      const pin = String(Math.floor(1000 + Math.random() * 9000));
+      try {
+        const existing = await window.storage.get(`join:${pin}`, true);
+        if (existing) {
+          const s = JSON.parse(existing.value);
+          if (s.active && s.token !== token) continue; // someone else's live game
+        }
+        await window.storage.set(`join:${pin}`, JSON.stringify({ pin, token, active: true }), true);
+        return pin;
+      } catch (e) {
+        // taken a moment ago, or no connection — try another code
+      }
     }
+    return null;
+  };
+
+  const enableSpectatorBetting = async () => {
+    if (specBusy) return;
+    setSpecError("");
+    setSpecBusy(true);
+    // Starting a fresh session — sweep the previous one's leftovers (its code,
+    // snapshot and any bets) rather than abandoning them.
+    if (sessionToken) endSharedSession(sessionToken, sessionPin);
     const token = uid();
-    const pin = String(Math.floor(1000 + Math.random() * 9000));
+    const pin = await claimJoinCode(token);
+    setSpecBusy(false);
+    if (!pin) {
+      setSpecError("Couldn't start spectator betting — check this phone's internet connection and try again.");
+      return;
+    }
     setSessionToken(token);
     setSessionPin(pin);
     setSpecEnabled(true);
-    try {
-      await window.storage.set("session-pin", JSON.stringify({ pin, token, active: true }), true);
-    } catch (e) {
-      // best effort
-    }
   };
 
   const disableSpectatorBetting = async () => {
     setSpecEnabled(false);
-    if (sessionToken) {
-      // Nothing will poll this token again — clear its bets and snapshot.
-      clearSharedUnder(`bet:${sessionToken}:`);
-      window.storage.delete(`race:${sessionToken}`, true).catch(() => {});
-    }
-    try {
-      if (sessionToken) {
-        await window.storage.set(
-          "session-pin",
-          JSON.stringify({ pin: sessionPin, token: sessionToken, active: false }),
-          true
-        );
-      }
-    } catch (e) {
-      // best effort
-    }
+    setSpecError("");
+    // Nothing will read this session again — mark the code free and clear
+    // its bets and snapshot.
+    endSharedSession(sessionToken, sessionPin);
   };
 
   useEffect(() => {
@@ -2260,6 +2291,8 @@ export default function App() {
                 sessionPin={sessionPin}
                 enableSpectatorBetting={enableSpectatorBetting}
                 disableSpectatorBetting={disableSpectatorBetting}
+                specBusy={specBusy}
+                specError={specError}
                 gameSession={gameSession}
                 bronzePoints={bronzePoints}
                 setBronzePoints={setBronzePoints}
@@ -3257,6 +3290,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
   const [nameInput, setNameInput] = useState("");
   const [joinError, setJoinError] = useState("");
   const [token, setToken] = useState(null);
+  const [joinedPin, setJoinedPin] = useState(null);
   const [spectatorName, setSpectatorName] = useState("");
   const [snapshot, setSnapshot] = useState(null);
   const [sessionActive, setSessionActive] = useState(true);
@@ -3266,6 +3300,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
   const [betRacer, setBetRacer] = useState("");
   const [betAmount, setBetAmount] = useState("");
   const [betType, setBetType] = useState("win"); // "win" | "place"
+  const [betError, setBetError] = useState("");
 
   const join = async () => {
     setJoinError("");
@@ -3280,21 +3315,22 @@ function SpectatorView({ onLeave, initialPin = "" }) {
       return;
     }
     try {
-      const res = await window.storage.get("session-pin", true);
+      const res = await window.storage.get(`join:${pin}`, true);
       if (!res) {
-        setJoinError("No game is being hosted right now.");
+        setJoinError("There's no game with that code. Double-check it with the host.");
         return;
       }
       const s = JSON.parse(res.value);
-      if (!s.active || s.pin !== pin) {
-        setJoinError("That code didn't match — double-check with the host.");
+      if (!s.active || !s.token) {
+        setJoinError("That game isn't taking spectators right now. Ask the host to turn spectator betting on.");
         return;
       }
       setToken(s.token);
+      setJoinedPin(pin);
       setSpectatorName(name);
       setJoined(true);
     } catch (e) {
-      setJoinError("Couldn't reach the game. Try again.");
+      setJoinError("Couldn't reach the game. Check your internet connection and try again.");
     }
   };
 
@@ -3318,10 +3354,10 @@ function SpectatorView({ onLeave, initialPin = "" }) {
         // try again next tick
       }
       try {
-        const s = await window.storage.get("session-pin", true);
-        if (!cancelled && s) {
-          const parsed = JSON.parse(s.value);
-          setSessionActive(!!parsed.active && parsed.token === token);
+        const s = await window.storage.get(`join:${joinedPin}`, true);
+        if (!cancelled) {
+          const parsed = s ? JSON.parse(s.value) : null;
+          setSessionActive(!!parsed && !!parsed.active && parsed.token === token);
         }
       } catch (e) {
         // try again next tick
@@ -3333,7 +3369,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [joined, token]);
+  }, [joined, token, joinedPin]);
 
   const placeBet = async () => {
     const amt = parseFloat(betAmount);
@@ -3341,10 +3377,15 @@ function SpectatorView({ onLeave, initialPin = "" }) {
     const bet = { id: uid(), bettorName: spectatorName, racerId: betRacer, amount: amt, betType };
     setMyBets((prev) => [...prev, bet]);
     setBetAmount("");
+    setBetError("");
     try {
       await window.storage.set(`bet:${token}:${snapshot.raceId}:${bet.id}`, JSON.stringify(bet), true);
     } catch (e) {
-      // best effort
+      // It didn't reach the host — take it back off this phone's list too, so
+      // nobody thinks a bet is down that the host never saw.
+      setMyBets((prev) => prev.filter((b) => b.id !== bet.id));
+      setBetAmount(String(amt));
+      setBetError("That bet didn't go through. Check your internet connection and tap Place bet again.");
     }
   };
 
@@ -3600,6 +3641,11 @@ function SpectatorView({ onLeave, initialPin = "" }) {
           >
             Place bet
           </button>
+          {betError && (
+            <p role="alert" className="text-sm mt-2" style={{ color: "var(--red)" }}>
+              {betError}
+            </p>
+          )}
         </Card>
       )}
 
@@ -5555,6 +5601,8 @@ function BettingTab(props) {
     sessionPin,
     enableSpectatorBetting,
     disableSpectatorBetting,
+    specBusy,
+    specError,
     gameSession,
     bronzePoints,
     setBronzePoints,
@@ -5830,11 +5878,22 @@ function BettingTab(props) {
               </p>
               <button
                 onClick={enableSpectatorBetting}
+                disabled={specBusy}
                 className="w-full py-2.5 rounded-lg text-sm font-bold"
-                style={{ background: "var(--purple)", color: "var(--paper2)", border: "2.5px solid var(--ink)" }}
+                style={{
+                  background: "var(--purple)",
+                  color: "var(--paper2)",
+                  border: "2.5px solid var(--ink)",
+                  opacity: specBusy ? 0.6 : 1,
+                }}
               >
-                📡 Enable spectator betting
+                {specBusy ? "Starting…" : "📡 Enable spectator betting"}
               </button>
+              {specError && (
+                <p role="alert" className="text-xs mt-2" style={{ color: "var(--red)" }}>
+                  {specError}
+                </p>
+              )}
             </>
           ) : (
             <>
