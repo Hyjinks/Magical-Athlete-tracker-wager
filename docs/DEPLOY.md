@@ -23,7 +23,13 @@ separate instructions for it.)
 
 ## Part B — first deploy (from your computer, about 10 minutes)
 
-You need Node.js 20 or newer (https://nodejs.org, "LTS") and a copy of the repo.
+You need Node.js 20 or newer (https://nodejs.org, "LTS") and Git
+(https://git-scm.com).
+
+Type these commands into a terminal, not the "Node.js" app (that's Node's own
+interactive prompt, marked with `>`). On Windows, open **Command Prompt** from the
+Start menu. PowerShell works too, but it sometimes blocks `npx`; if it does, use
+Command Prompt instead.
 
 ```bash
 # 1. Get the latest code (or `git pull` if you already have it)
@@ -33,9 +39,10 @@ cd Magical-Athlete-tracker-wager
 # 2. Install the project's tools (once)
 npm install
 
-# 3. Build and check everything (lint, both builds, smoke test)
-npm run check
-#    If the smoke test can't find a browser, run `npx playwright install chromium` once.
+# 3. Build the app (lint + both builds)
+npm run build
+#    `npm run check` also runs the full smoke test; it needs a one-off
+#    `npx playwright install chromium` first. Not needed just to deploy.
 
 # 4. Sign in to Firebase (opens a browser window; once per computer)
 npx firebase-tools login
@@ -52,7 +59,7 @@ npx firebase-tools deploy --only hosting
 The last command prints the address, something like
 `https://magical-athlete-3f2a1.web.app`. Open it on your phone. That's the app.
 
-To update it later: `git pull`, `npm run check`, then step 6 again.
+To update it later: `git pull`, `npm run build`, then step 6 again.
 
 ## Part C — optional: deploy automatically on every push
 
