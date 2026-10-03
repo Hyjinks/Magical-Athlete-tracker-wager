@@ -7,9 +7,15 @@ Mobile-first: it's used on phones at the table.
 
 - **`magical-athlete-tracker.jsx` in this repo is the app.** One file, React 18,
   Tailwind classes, lucide-react icons, storage through `window.storage`.
-- The live app is a claude.ai artifact: https://claude.ai/artifact/7NwzKSA9UdiRtRmhZ7z47U
-  (the same artifact also appears as `claude.ai/code/artifact/33a756bd-…`).
-  It only changes when someone republishes it.
+- It ships two ways, both built from that one file:
+  - **claude.ai artifact** (`npm run build:artifact` → `dist/magical-athlete.html`):
+    https://claude.ai/artifact/7NwzKSA9UdiRtRmhZ7z47U (also shown as
+    `claude.ai/code/artifact/33a756bd-…`). Changes only when republished.
+  - **Hosted web app / PWA** (`npm run build:web` → `dist-web/`), deployed to Firebase
+    Hosting. This is what spectators without claude.ai accounts will use (the
+    intended venue is a retirement-village game night). Setup and deploy:
+    `docs/DEPLOY.md`. Deploying needs Adam's Firebase login, or the GitHub Action
+    from DEPLOY.md Part C if he has set it up.
 - Old versions, kept for reference only — never build from them or copy code back:
   `archive/vite-pwa-july-2026/` (the July installable-PWA version; see
   `archive/README.md`). Older versions of the app itself are in git history.
@@ -20,7 +26,7 @@ Mobile-first: it's used on phones at the table.
 ## Every change: the checklist
 
 1. Edit `magical-athlete-tracker.jsx` only.
-2. `npm run check` — lint, build, smoke test. All three must pass.
+2. `npm run check` — lint, both builds, smoke test against both. All must pass.
    - Lint errors block the build. Warnings are allowed but read them.
 3. Look at the phone-screen screenshots in `test-results/` for any tab you touched
    (`setup-*` before a race, `race-*` mid-race — only Track and Dice open mid-race;
@@ -29,6 +35,8 @@ Mobile-first: it's used on phones at the table.
 4. Publish `dist/magical-athlete.html` with the Artifact tool, passing the URL above
    so it updates in place (a new URL would lose people's saved games).
 5. Commit and push to `main` (`git fetch origin main && git rebase origin/main` first).
+   The web app is redeployed from `main` (by Adam, or automatically if Part C of
+   `docs/DEPLOY.md` is set up) — say so when a change needs it.
 6. For anything about feel — animations, timing, layout on a real phone — tell Adam
    it was checked headless only and ask him to try it on his phone.
 
@@ -63,10 +71,17 @@ npm run check
   (`tailwind.config.cjs`), so any Tailwind class works. (Old advice to use inline
   styles because the artifact's CSS was purged only applied to hand-patching the
   artifact, which we no longer do.)
-- **Storage.** On claude.ai the host provides `window.storage`, which is what keeps
-  saved games and history. `scripts/artifact/entry.jsx` only adds a localStorage
-  fallback for local runs (keys `ma:` personal, `ma-s:` shared). Shared keys are
-  device-local in that fallback, so spectating across phones can't be tested locally.
+- **Storage.** The app only talks to `window.storage.get/set/delete/list(key, shared)`.
+  On claude.ai the host provides it. Everywhere else `src/storage-local.js` provides it
+  from localStorage (keys `ma:` personal, `ma-s:` shared). In the web app, shared keys
+  (join code `session-pin`, race snapshot `race:<token>`, bets `bet:<token>:<raceId>:<id>`)
+  are still device-local until the Firestore step — spectators on other phones can't
+  join yet.
+- **Service worker (web app).** It caches the whole app so it opens on patchy Wi-Fi,
+  and updates itself the next time the app is opened. `firebase.json` stops
+  `index.html` and `sw.js` being cached by the browser so updates are seen. The smoke
+  test blocks service workers except in its "Installable web app" section, because an
+  installed worker fetches Google Fonts past the test's offline stub.
 - **Bottom tab bar.** Host screens have a fixed bottom `TabBar` (56px tabs, padded
   for the iPhone home bar). Its height is `TAB_BAR_SPACE`, exposed to CSS as
   `--ma-tabbar`. Anything sticky at the bottom of a host screen must use
@@ -99,13 +114,21 @@ npm run check
 ```
 magical-athlete-tracker.jsx   the app
 scripts/build-artifact.mjs    the only way to build the artifact → dist/magical-athlete.html
-scripts/artifact/entry.jsx    mounts the app, storage fallback for local runs
-scripts/artifact/styles.css   Tailwind input + page base styles
-tests/smoke.mjs               headless phone-size play-through (Playwright)
+scripts/artifact/entry.jsx    artifact entry: mounts the app
+index.html, src/main.jsx      web app entry (Vite) → dist-web/
+vite.config.js                web build + PWA manifest and service worker
+public/icons/                 home-screen icons
+src/storage-local.js          window.storage from localStorage (both builds)
+src/styles.css                Tailwind input + page base styles (both builds)
+firebase.json, docs/DEPLOY.md Firebase Hosting config and setup steps
+tests/smoke.mjs               headless phone-size play-through of both builds
 archive/                      old versions, reference only (not built or linted)
 ```
 
 ## Known issues (October 2026 review)
 
 - The spectator snapshot doesn't include the track or who is tripped.
+- Spectators on other phones need the Firestore step (shared keys → Firestore, with
+  security rules and invisible anonymous sign-in), then QR-code joining and a larger,
+  simpler spectator screen for older users.
 - `App()` is ~1,600 lines; the file is ~7,200.

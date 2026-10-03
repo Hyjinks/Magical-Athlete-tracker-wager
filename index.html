@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Magical Athlete</title>
+    <meta name="description" content="Race tracker, betting and draft companion for the Magical Athlete board game." />
+    <!-- Address-bar / status-bar colour; the app updates it when the theme changes. -->
+    <meta name="theme-color" content="#E5402A" />
+
+    <!-- iPhone "Add to Home Screen": iOS reads these tags, not the web manifest. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Magical Athlete" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+
+    <style>
+      :root { --page-bg: #E5402A; color-scheme: light; }
+      html, body { min-height: 100%; }
+      body { background: var(--page-bg); margin: 0; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

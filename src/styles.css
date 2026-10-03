@@ -1,4 +1,5 @@
-/* Page-level CSS for the published artifact. Tailwind scans
+/* Tailwind input + page base styles, shared by both builds (the claude.ai
+   artifact and the hosted web app). Tailwind scans
    magical-athlete-tracker.jsx (see tailwind.config.cjs), so every class used in
    the app is generated fresh on each build — nothing is reused from an old
    artifact, and new classes never go missing.

@@ -666,6 +666,9 @@ export default function App() {
     try {
       document.documentElement.style.background = theme.bg;
       document.body.style.background = theme.bg;
+      // Phone status bar / address bar colour (hosted web app).
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute("content", theme.bg);
     } catch (e) {
       // no document (tests) — fine
     }

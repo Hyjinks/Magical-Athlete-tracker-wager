@@ -51,7 +51,7 @@ try {
   const cssOut = join(tmp, "tailwind.css");
   execFileSync(
     join(root, "node_modules", ".bin", "tailwindcss"),
-    ["-c", join(root, "tailwind.config.cjs"), "-i", join(root, "scripts/artifact/styles.css"), "-o", cssOut, "--minify"],
+    ["-c", join(root, "tailwind.config.cjs"), "-i", join(root, "src/styles.css"), "-o", cssOut, "--minify"],
     { cwd: root, stdio: ["ignore", "ignore", "pipe"] }
   );
   css = readFileSync(cssOut, "utf8");
