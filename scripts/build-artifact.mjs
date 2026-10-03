@@ -49,9 +49,13 @@ const tmp = mkdtempSync(join(tmpdir(), "ma-build-"));
 let css;
 try {
   const cssOut = join(tmp, "tailwind.css");
+  // Run Tailwind's CLI script with this same Node, rather than the
+  // node_modules/.bin shim: on Windows that shim is a .cmd file, which
+  // execFileSync can't launch.
+  const tailwindCli = join(root, "node_modules", "tailwindcss", "lib", "cli.js");
   execFileSync(
-    join(root, "node_modules", ".bin", "tailwindcss"),
-    ["-c", join(root, "tailwind.config.cjs"), "-i", join(root, "src/styles.css"), "-o", cssOut, "--minify"],
+    process.execPath,
+    [tailwindCli, "-c", join(root, "tailwind.config.cjs"), "-i", join(root, "src/styles.css"), "-o", cssOut, "--minify"],
     { cwd: root, stdio: ["ignore", "ignore", "pipe"] }
   );
   css = readFileSync(cssOut, "utf8");
