@@ -240,6 +240,38 @@ function prefersReducedMotion() {
   }
 }
 
+// Keeps the phone screen awake while `active` (the host's phone sits on the
+// table for the whole race). Fails soft where the Wake Lock API is missing or
+// blocked (older iOS, a frame without permission, battery saver). Browsers drop
+// the lock whenever the page is hidden, so it's re-requested on return.
+function useWakeLock(active) {
+  useEffect(() => {
+    if (!active || typeof navigator === "undefined" || !("wakeLock" in navigator)) return undefined;
+    let lock = null;
+    let cancelled = false;
+    const request = async () => {
+      if (cancelled || document.visibilityState !== "visible") return;
+      try {
+        const next = await navigator.wakeLock.request("screen");
+        if (cancelled) next.release().catch(() => {});
+        else lock = next;
+      } catch (e) {
+        lock = null; // not allowed here — the screen just sleeps as normal
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible" && (!lock || lock.released)) request();
+    };
+    request();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibility);
+      if (lock && !lock.released) lock.release().catch(() => {});
+    };
+  }, [active]);
+}
+
 // Tiny haptic tick on phones that support it (Android Chrome; iOS Safari ignores it).
 function buzz(ms = 12) {
   try {
@@ -628,6 +660,16 @@ export default function App() {
   const [tab, setTab] = useState("setup");
   const [themeId, setThemeId] = useState("poster");
   const theme = THEMES[themeId] || THEMES.poster;
+  // The safe-area padding around the app (notch, home bar) and iOS overscroll
+  // show the page behind it — keep that the theme colour too.
+  useEffect(() => {
+    try {
+      document.documentElement.style.background = theme.bg;
+      document.body.style.background = theme.bg;
+    } catch (e) {
+      // no document (tests) — fine
+    }
+  }, [theme.bg]);
 
   // --- spectator-betting session (host side) ---
   const [specEnabled, setSpecEnabled] = useState(false);
@@ -736,6 +778,8 @@ export default function App() {
   };
 
   const [status, setStatus] = useState("setup"); // setup | racing | finished
+  // The host's phone stays awake for the whole race.
+  useWakeLock(mode === "host" && status === "racing");
   const trackLength = STANDARD_TRACK_LENGTH; // both boards are 30 spaces
   const [trackName, setTrackName] = useState("mild"); // "mild" | "wild"
   const [racers, setRacers] = useState([emptyRacer(0), emptyRacer(1)]);
@@ -1667,6 +1711,9 @@ export default function App() {
     }
   };
 
+  // Host screens get the fixed bottom tab bar.
+  const hasTabBar = mode === "host" && !showChampion;
+
   return (
     <div
       className="min-h-screen"
@@ -1689,6 +1736,17 @@ export default function App() {
            the 48px hit area. */
         button, [role="button"] { min-height: 48px; min-width: 48px; }
         input:not([type="checkbox"]):not([type="radio"]), select, textarea { min-height: 48px; }
+        /* iOS zooms the whole page when a text field under 16px is focused.
+           Fields default to 16px here; never put text-sm / text-xs on an
+           input, select or textarea (a class beats this rule). */
+        input, select, textarea { font-size: 16px; }
+        /* Keep content clear of the notch / status bar when the page runs
+           edge to edge (viewport-fit=cover). */
+        :root { padding-top: env(safe-area-inset-top, 0px); }
+        /* Sticky action buttons sit just above the bottom tab bar. --ma-tabbar
+           is the bar's height (0 when there's no bar). */
+        .ma-above-tabbar { bottom: calc(var(--ma-tabbar, 0px) + 12px); }
+        .ma-on-tabbar { bottom: var(--ma-tabbar, 0px); }
         @keyframes trophyGlow {
           0%, 100% { filter: drop-shadow(0 0 2px var(--yellow)) brightness(1); transform: scale(1); }
           50% { filter: drop-shadow(0 0 14px var(--yellow)) brightness(1.15); transform: scale(1.08); }
@@ -1942,7 +2000,13 @@ export default function App() {
         }
       `}</style>
 
-      <div className="max-w-3xl mx-auto px-4 pb-24">
+      <div
+        className="max-w-3xl mx-auto px-4"
+        style={{
+          "--ma-tabbar": hasTabBar ? TAB_BAR_SPACE : "0px",
+          paddingBottom: hasTabBar ? `calc(${TAB_BAR_SPACE} + 24px)` : 96,
+        }}
+      >
         {/* Slim top bar: settings + help in the upper right. Lives above the hero
             (not below it) so the start options sit higher on phones, and the
             panels open directly under the buttons that opened them. */}
@@ -3213,7 +3277,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
           value={nameInput}
           onChange={(e) => setNameInput(e.target.value)}
           placeholder="Your name"
-          className="w-full mb-2 px-3 py-2 rounded-lg border text-sm"
+          className="w-full mb-2 px-3 py-2 rounded-lg border"
           style={{ borderColor: "var(--ink)", background: "var(--paper)" }}
         />
         <input
@@ -3222,7 +3286,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
           onKeyDown={(e) => e.key === "Enter" && join()}
           placeholder="4-digit code"
           inputMode="numeric"
-          className="w-full mb-2 px-3 py-2 rounded-lg border text-sm font-mono text-center text-lg tracking-widest"
+          className="w-full mb-2 px-3 py-2 rounded-lg border font-mono text-center text-lg tracking-widest"
           style={{ borderColor: "var(--ink)", background: "var(--paper)" }}
         />
         {joinError && (
@@ -3442,7 +3506,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
               value={betAmount}
               onChange={(e) => setBetAmount(e.target.value)}
               placeholder="custom"
-              className="flex-1 px-2 py-2 rounded-lg border text-sm"
+              className="flex-1 px-2 py-2 rounded-lg border"
               style={{ borderColor: "var(--ink)", background: "var(--paper)", minWidth: 80 }}
             />
           </div>
@@ -3529,6 +3593,12 @@ function ConfirmButton({ onConfirm, armedLabel, className, style, children }) {
   );
 }
 
+// Height the fixed bottom tab bar takes up, including the iPhone home-bar
+// inset: 8px padding + 4px border + 56px tabs + 4px border + 8px padding.
+const TAB_BAR_SPACE = "calc(80px + env(safe-area-inset-bottom, 0px))";
+
+// Fixed to the bottom of the screen so it's in thumb reach on a phone. Tabs are
+// 56px tall; mid-race only Track and Dice can be opened.
 function TabBar({ tab, setTab, status }) {
   const tabs = [
     { id: "setup", label: "Racers", icon: Users },
@@ -3539,31 +3609,53 @@ function TabBar({ tab, setTab, status }) {
   ];
   const racing = status === "racing";
   return (
-    <div
-      className="flex rounded-lg overflow-hidden mb-6 border-4"
-      style={{ borderColor: "var(--ink)" }}
+    <nav
+      aria-label="Sections"
+      className="fixed inset-x-0 bottom-0 z-40"
+      style={{
+        background: "var(--bg)",
+        padding: "8px 16px",
+        paddingBottom: "calc(8px + env(safe-area-inset-bottom, 0px))",
+        boxShadow: "0 -6px 16px rgba(0,0,0,0.18)",
+      }}
     >
-      {tabs.map((t) => {
-        const active = tab === t.id;
-        const lockedOut = racing && t.id !== "track" && t.id !== "dice";
-        const Icon = t.icon;
-        return (
-          <button
-            key={t.id}
-            onClick={() => !lockedOut && setTab(t.id)}
-            disabled={lockedOut}
-            className="flex-1 flex flex-col items-center gap-1 py-2.5 text-xs font-medium transition-colors disabled:opacity-30"
-            style={{
-              background: active ? "var(--yellow)" : "transparent",
-              color: active ? "var(--ink)" : "var(--onBgMuted)",
-            }}
-          >
-            <Icon size={15} />
-            {t.label}
-          </button>
-        );
-      })}
-    </div>
+      <div
+        className="max-w-3xl mx-auto flex rounded-lg overflow-hidden border-4"
+        style={{ borderColor: "var(--ink)" }}
+      >
+        {tabs.map((t) => {
+          const active = tab === t.id;
+          const lockedOut = racing && t.id !== "track" && t.id !== "dice";
+          const Icon = t.icon;
+          return (
+            <button
+              key={t.id}
+              onClick={() => {
+                if (lockedOut || active) return;
+                setTab(t.id);
+                // A new tab starts at its top, not wherever the last one was scrolled to.
+                try {
+                  window.scrollTo({ top: 0 });
+                } catch (e) {
+                  // fine
+                }
+              }}
+              disabled={lockedOut}
+              aria-current={active ? "page" : undefined}
+              className="flex-1 flex flex-col items-center justify-center gap-1 text-xs font-medium transition-colors disabled:opacity-30"
+              style={{
+                minHeight: 56,
+                background: active ? "var(--yellow)" : "transparent",
+                color: active ? "var(--ink)" : "var(--onBgMuted)",
+              }}
+            >
+              <Icon size={18} />
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+    </nav>
   );
 }
 
@@ -3879,7 +3971,7 @@ function RacerBrowseSheet({ open, onClose, values, count, onToggle, blocked, tag
           autoComplete="off"
           autoCorrect="off"
           spellCheck={false}
-          className="w-full px-3 py-2 rounded-lg border text-sm mb-2"
+          className="w-full px-3 py-2 rounded-lg border mb-2"
           style={{ borderColor: "var(--ink)", background: "var(--paper)" }}
         />
         <div className="overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-1.5 flex-1" style={{ minHeight: 0 }}>
@@ -4352,7 +4444,7 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
                 })
               }
               placeholder={`Player ${i + 1}`}
-              className="w-full px-3 py-2 rounded-lg border text-sm"
+              className="w-full px-3 py-2 rounded-lg border"
               style={{ borderColor: "var(--ink)", background: "var(--paper)" }}
             />
           ))}
@@ -4455,7 +4547,7 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
                   value={rolls[seat] ?? ""}
                   onChange={(e) => setManualRoll(seat, e.target.value)}
                   placeholder="1–6"
-                  className="w-16 px-2 py-1.5 rounded border text-sm font-mono text-center"
+                  className="w-16 px-2 py-1.5 rounded border font-mono text-center"
                   style={{ borderColor: "var(--ink)", background: "var(--paper2)" }}
                   aria-label={`${labelFor(seat)} die roll`}
                 />
@@ -4566,7 +4658,7 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
                 inputRef={(el) => (cardRefs.current[i] = el)}
                 placeholder={`Card ${i + 1}`}
                 enterKeyHint={i === cardCount - 1 ? "done" : "next"}
-                className="w-full px-3 py-2 rounded-lg border text-sm"
+                className="w-full px-3 py-2 rounded-lg border"
                 style={{ borderColor: "var(--ink)", background: "var(--paper)" }}
               />
             );
@@ -4589,7 +4681,7 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
           </p>
         )}
         <div
-          className="sticky bottom-0 pt-2 pb-1"
+          className="sticky ma-on-tabbar pt-2 pb-1"
           style={{ background: "linear-gradient(to top, var(--paper2) 70%, transparent)" }}
         >
           <button
@@ -5064,7 +5156,7 @@ function SetupTab({
                       placeholder="Who is racing?"
                       aria-label={`Racer ${i + 1} player`}
                       autoComplete="off"
-                      className="w-full px-2 py-1.5 rounded border text-sm"
+                      className="w-full px-2 py-1.5 rounded border"
                       style={{ borderColor: "var(--ink)", background: "var(--paper)" }}
                     />
                   </div>
@@ -5080,7 +5172,7 @@ function SetupTab({
                       placeholder={`Racer ${i + 1} name`}
                       ariaLabel={`Racer ${i + 1} name`}
                       enterKeyHint="done"
-                      className="w-full px-2 py-1.5 rounded border text-sm font-medium"
+                      className="w-full px-2 py-1.5 rounded border font-medium"
                       style={{ borderColor: "var(--ink)", background: "var(--paper)" }}
                     />
                   </div>
@@ -5148,7 +5240,7 @@ function SetupTab({
                   disabled={locked}
                   onChange={(e) => updateRacer(r.id, { notes: e.target.value })}
                   placeholder="ability notes (optional)"
-                  className="w-full mt-1.5 px-2 py-1 rounded border text-xs"
+                  className="w-full mt-1.5 px-2 py-1 rounded border"
                   style={{ borderColor: "var(--ink)", background: "var(--paper)" }}
                 />
               )}
@@ -5167,7 +5259,7 @@ function SetupTab({
       </Card>
 
       {status === "setup" && (
-        <div className="sticky bottom-3 z-20 pt-1">
+        <div className="sticky ma-above-tabbar z-20 pt-1">
           <button
             onClick={startRace}
             disabled={validCount < 2}
@@ -5466,7 +5558,7 @@ function BettingTab(props) {
                 value={goldPoints}
                 onChange={(e) => setGoldPoints(e.target.value)}
                 placeholder="points"
-                className="w-full mt-0.5 px-2 py-1.5 rounded border text-sm"
+                className="w-full mt-0.5 px-2 py-1.5 rounded border"
                 style={{ borderColor: "var(--ink)", background: "var(--paper)" }}
               />
             </div>
@@ -5480,7 +5572,7 @@ function BettingTab(props) {
                 value={silverPoints}
                 onChange={(e) => setSilverPoints(e.target.value)}
                 placeholder="points"
-                className="w-full mt-0.5 px-2 py-1.5 rounded border text-sm"
+                className="w-full mt-0.5 px-2 py-1.5 rounded border"
                 style={{ borderColor: "var(--ink)", background: "var(--paper)" }}
               />
             </div>
@@ -5507,7 +5599,7 @@ function BettingTab(props) {
                         setBronzePoints((prev) => ({ ...prev, [p]: e.target.value }))
                       }
                       placeholder="0"
-                      className="w-full mt-0.5 px-2 py-1.5 rounded border text-sm"
+                      className="w-full mt-0.5 px-2 py-1.5 rounded border"
                       style={{ borderColor: "var(--ink)", background: "var(--paper)" }}
                     />
                   </div>
@@ -5719,7 +5811,7 @@ function BettingTab(props) {
               onChange={(e) => setNewBettorName(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && addBettor()}
               placeholder="Spectator name"
-              className="flex-1 px-2 py-1.5 rounded border text-sm"
+              className="flex-1 px-2 py-1.5 rounded border"
               style={{ borderColor: "var(--ink)", background: "var(--paper)" }}
             />
             <button
@@ -5925,7 +6017,7 @@ function BettingTab(props) {
               value={betAmount}
               onChange={(e) => setBetAmount(e.target.value)}
               placeholder="custom"
-              className="flex-1 px-2 py-2 rounded-lg border text-sm"
+              className="flex-1 px-2 py-2 rounded-lg border"
               style={{ borderColor: "var(--ink)", background: "var(--paper)", minWidth: 80 }}
             />
           </div>
@@ -6204,7 +6296,7 @@ function MoveControls({ racer, others, trackLength, moveRacer, setPositionDirect
             if (e.key === "Enter") submitGo();
           }}
           placeholder={`0–${trackLength}`}
-          className="flex-1 px-2 rounded border text-sm"
+          className="flex-1 px-2 rounded border"
           style={{ borderColor: "var(--ink)", background: "var(--paper)", minHeight: 48, minWidth: 60 }}
         />
         <button
@@ -6617,7 +6709,7 @@ function TrackTab({
         </button>
       )}
 
-      <div className="sticky bottom-3 z-20">
+      <div className="sticky ma-above-tabbar z-20">
         {status === "racing" && activeRacerId && (
           <button
             onClick={advanceTurn}

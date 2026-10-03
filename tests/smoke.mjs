@@ -15,9 +15,9 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PAGE = join(root, "dist", "magical-athlete.html");
 const SHOTS = join(root, "test-results");
 
-// Known issue: many inputs are under 16px, which makes iPhones zoom in on tap.
-// Flip to true once that's fixed so it can never come back.
-const STRICT_INPUT_FONT = false;
+// iPhones zoom the page when a text field under 16px is tapped. Fixed in
+// October 2026 — kept strict so it can't come back.
+const STRICT_INPUT_FONT = true;
 
 if (!existsSync(PAGE)) {
   console.error("dist/magical-athlete.html not found — run `npm run build` first.");
@@ -47,6 +47,20 @@ async function openApp(context) {
   await ctx.route(/fonts\.(googleapis|gstatic)\.com/, (route) =>
     route.fulfill({ status: 200, contentType: "text/css", body: "" })
   );
+  // Stand-in Wake Lock API that records what the app asks for.
+  await ctx.addInitScript(() => {
+    window.__wakeLog = [];
+    Object.defineProperty(navigator, "wakeLock", {
+      configurable: true,
+      value: {
+        request: async (type) => {
+          window.__wakeLog.push(`request:${type}`);
+          const lock = { released: false, release: async () => { lock.released = true; window.__wakeLog.push("release"); } };
+          return lock;
+        },
+      },
+    });
+  });
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(`page error: ${e.message}`));
@@ -87,16 +101,35 @@ async function positions(page) {
 }
 
 // Open every tab that isn't locked (most are locked mid-race), check it fits the
-// phone width, and save a full-page screenshot as test-results/<stage>-<tab>.png.
+// phone width and nothing hides behind the tab bar, and save phone-screen
+// screenshots as test-results/<stage>-<tab>-top.png / -bottom.png.
 async function visitTabs(page, stage) {
   for (const tab of ["Racers", "Betting", "Track", "Dice", "History"]) {
     const button = page.locator("button", { hasText: new RegExp(`^${tab}$`) }).first();
     if (await button.isDisabled()) continue;
     await button.click({ force: true });
     await page.waitForTimeout(500);
-    await page.screenshot({ path: join(SHOTS, `${stage}-${tab.toLowerCase()}.png`), fullPage: true });
+    // Phone-screen shots (not full-page, which draws the fixed tab bar mid-page):
+    // one at the top of the tab and one scrolled to the bottom.
+    await page.screenshot({ path: join(SHOTS, `${stage}-${tab.toLowerCase()}-top.png`) });
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await page.waitForTimeout(150);
+    await page.screenshot({ path: join(SHOTS, `${stage}-${tab.toLowerCase()}-bottom.png`) });
+    await page.evaluate(() => window.scrollTo(0, 0));
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     check(overflow <= 0, `${stage}: ${tab} tab fits the phone width${overflow > 0 ? ` (${overflow}px too wide)` : ""}`);
+    // Scrolled to the very bottom, the last card must end above the tab bar.
+    const hidden = await page.evaluate(() => {
+      window.scrollTo(0, document.documentElement.scrollHeight);
+      const nav = document.querySelector('nav[aria-label="Sections"]');
+      const main = nav && nav.previousElementSibling ? nav.parentElement : null;
+      if (!nav || !main) return 0;
+      const navTop = nav.getBoundingClientRect().top;
+      const lastBottom = Math.max(...[...main.children].filter((el) => el !== nav).map((el) => el.getBoundingClientRect().bottom));
+      return Math.max(0, Math.round(lastBottom - navTop));
+    });
+    check(hidden === 0, `${stage}: bottom of ${tab} isn't hidden behind the tab bar${hidden ? ` (${hidden}px covered)` : ""}`);
+    await page.evaluate(() => window.scrollTo(0, 0));
   }
 }
 
@@ -144,6 +177,20 @@ console.log("\nWild Wilds race: track spaces, trip skip, undo");
   await setUpRace(page, "wild");
   let pos = await positions(page);
   check(pos.Hare === 0 && pos.Banana === 0 && pos.Egg === 0, "race starts with everyone on Start");
+  check((await page.evaluate(() => window.__wakeLog)).includes("request:screen"), "screen wake lock requested when the race starts");
+
+  // Bottom tab bar: pinned to the bottom, big tabs, and never covering the race buttons
+  const bar = await page.evaluate(() => {
+    const nav = document.querySelector('nav[aria-label="Sections"]');
+    if (!nav) return null;
+    const r = nav.getBoundingClientRect();
+    const tabs = [...nav.querySelectorAll("button")].map((b) => b.getBoundingClientRect().height);
+    const next = [...document.querySelectorAll("button")].find((b) => /Next turn/.test(b.innerText));
+    return { bottom: r.bottom, top: r.top, vh: window.innerHeight, tabs, nextBottom: next ? next.getBoundingClientRect().bottom : null };
+  });
+  check(bar && Math.abs(bar.bottom - bar.vh) <= 1, "tab bar is pinned to the bottom of the screen");
+  check(bar && bar.tabs.length === 5 && bar.tabs.every((h) => h >= 56), `tabs are at least 56px tall (${bar ? bar.tabs.map(Math.round).join(", ") : "no bar"})`);
+  check(bar && bar.nextBottom !== null && bar.nextBottom <= bar.top, "Next turn button sits above the tab bar");
 
   // Hare → space 5 (trip)
   await tap(page, /^\+5$/);
@@ -194,6 +241,7 @@ console.log("\nWild Wilds race: track spaces, trip skip, undo");
   await page.waitForTimeout(400);
   const text = await bodyText(page);
   check(/Race finished/i.test(text), "race ends when the 2nd racer crosses");
+  check((await page.evaluate(() => window.__wakeLog)).includes("release"), "wake lock released when the race ends");
   check(/1st/.test(text) && /2nd/.test(text), "1st and 2nd places shown");
 
   // Saved game survives a reload
@@ -237,7 +285,7 @@ console.log("\nDraft roll-off");
   const rolls = await page.locator('[role="status"]').evaluateAll((els) => els.map((el) => el.getAttribute("aria-label")));
   const values = rolls.map((l) => Number((l || "").match(/rolled (\d)/)?.[1])).filter(Boolean);
   check(values.length === 3 && values.every((v) => v >= 1 && v <= 6), `all three dice land on 1–6 (${values.join(", ")})`);
-  await page.screenshot({ path: join(SHOTS, "draft-rolloff.png"), fullPage: true });
+  await page.screenshot({ path: join(SHOTS, "draft-rolloff.png") });
   check(errors.length === 0, `no errors${errors.length ? `: ${errors.join(" / ")}` : ""}`);
   await ctx.close();
 }
@@ -262,6 +310,10 @@ console.log("\nMobile checks");
   await tap(page, /^Betting$/, 400);
   await collect();
   await visitTabs(page, "setup"); // every tab is open before the race starts
+  await tap(page, /^Racers$/, 400);
+  await tap(page, /^Run a draft$/, 600);
+  await tap(page, /^Got it$/).catch(() => {});
+  await collect(); // draft
   const small = [...found.values()];
   const msg = `inputs at 16px or larger (iOS zoom)${small.length ? ` — ${small.length} too small: ${small.map((x) => `${x.name} ${x.size}px`).join(", ")}` : ""}`;
   if (STRICT_INPUT_FONT) check(small.length === 0, msg);

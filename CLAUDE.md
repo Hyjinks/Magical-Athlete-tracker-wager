@@ -19,8 +19,9 @@ Mobile-first: it's used on phones at the table.
 1. Edit `magical-athlete-tracker.jsx` only.
 2. `npm run check` — lint, build, smoke test. All three must pass.
    - Lint errors block the build. Warnings are allowed but read them.
-3. Look at the phone-width screenshots in `test-results/` for any tab you touched
-   (`setup-*` before a race, `race-*` mid-race — only Track and Dice open mid-race).
+3. Look at the phone-screen screenshots in `test-results/` for any tab you touched
+   (`setup-*` before a race, `race-*` mid-race — only Track and Dice open mid-race;
+   `-top` and `-bottom` of each).
    Google Fonts are stubbed in the test, so headings show a fallback font there.
 4. Publish `dist/magical-athlete.html` with the Artifact tool, passing the URL above
    so it updates in place (a new URL would lose people's saved games).
@@ -46,9 +47,10 @@ npm run check
   `react/jsx-no-undef` is what catches it — that's why the build runs lint first.
   Icons passed as props (`icon={Trophy}`) still need importing.
 - **iOS input zoom.** Any `<input>`, `<select>` or `<textarea>` with a font under 16px
-  (`text-sm`, `text-xs`) makes iPhones zoom in when tapped. The smoke test lists
-  these as a known issue; once fixed, set `STRICT_INPUT_FONT = true` in
-  `tests/smoke.mjs` so it can't come back.
+  makes iPhones zoom in when tapped. A base CSS rule sets fields to 16px, but a class
+  beats it — so never put `text-sm` / `text-xs` on a field, including via a
+  `className` prop passed to a component that renders one (`RacerNameField`). The
+  smoke test fails if any visible field is under 16px.
 - **48px touch targets.** A global rule makes every button at least 48×48px. For small
   chips and pills, keep the button as the 48px hit area and draw the visible shape on
   an inner element (e.g. a 28px-high span, `items-center` on the row). For an icon
@@ -62,6 +64,18 @@ npm run check
   saved games and history. `scripts/artifact/entry.jsx` only adds a localStorage
   fallback for local runs (keys `ma:` personal, `ma-s:` shared). Shared keys are
   device-local in that fallback, so spectating across phones can't be tested locally.
+- **Bottom tab bar.** Host screens have a fixed bottom `TabBar` (56px tabs, padded
+  for the iPhone home bar). Its height is `TAB_BAR_SPACE`, exposed to CSS as
+  `--ma-tabbar`. Anything sticky at the bottom of a host screen must use
+  `.ma-above-tabbar` (or `.ma-on-tabbar`), not `bottom-0` / `bottom-3`, or it hides
+  behind the bar. Modals use `z-50`; the bar is `z-40`.
+- **Safe areas.** `viewport-fit=cover` is on, so the app pads for the notch at the
+  top and the bar pads for the home bar. The page background follows the theme so
+  those areas aren't the wrong colour. Headless tests can't simulate a notch —
+  check on a real iPhone.
+- **Wake lock.** `useWakeLock` keeps the host's screen on while racing. It fails
+  silently where the browser or frame doesn't allow it; the smoke test checks it's
+  requested and released using a stand-in API.
 - **First-visit effects** (the landing flag wipe) are skipped for anyone with saved
   games. Tapping the title replays it.
 - **Boards.** Both Mild Mile and Wild Wilds are 30 spaces (Start = 0, finish = 30).
@@ -82,8 +96,6 @@ tests/smoke.mjs               headless phone-size play-through (Playwright)
 
 ## Known issues (October 2026 review)
 
-- iOS zoom on inputs; no wake lock; tabs at the top and little safe-area padding —
-  the August mobile fixes were made in the old Vite copy and never ported here.
 - Undo doesn't step back across turns or restore a trip already skipped.
 - The spectator snapshot doesn't include the track or who is tripped.
 - `App()` is ~1,600 lines; the file is ~7,200.
