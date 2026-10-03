@@ -50,7 +50,7 @@ npx firebase-tools login
 # 5. Point the repo at your project — use the project ID from Part A
 npx firebase-tools use --add
 #    Pick your project from the list, and type `default` when it asks for an alias.
-#    This creates a .firebaserc file; commit it so it's remembered.
+#    (Already done for `magical-athlete` — the repo's .firebaserc points there.)
 
 # 6. Put it online
 npx firebase-tools deploy --only hosting

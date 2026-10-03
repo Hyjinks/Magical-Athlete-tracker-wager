@@ -12,7 +12,7 @@ Mobile-first: it's used on phones at the table.
     https://claude.ai/artifact/7NwzKSA9UdiRtRmhZ7z47U (also shown as
     `claude.ai/code/artifact/33a756bd-…`). Changes only when republished.
   - **Hosted web app / PWA** (`npm run build:web` → `dist-web/`), deployed to Firebase
-    Hosting. This is what spectators without claude.ai accounts will use (the
+    Hosting at https://magical-athlete.web.app (Firebase project `magical-athlete`). This is what spectators without claude.ai accounts will use (the
     intended venue is a retirement-village game night). Setup and deploy:
     `docs/DEPLOY.md`. Deploying needs Adam's Firebase login, or the GitHub Action
     from DEPLOY.md Part C if he has set it up.
