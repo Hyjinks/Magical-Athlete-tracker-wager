@@ -199,13 +199,13 @@ console.log("\nWild Wilds race: track spaces, trip skip, undo");
   check(/Tripped/.test(await bodyText(page)), "Hare is marked tripped");
 
   // Banana → space 1 (star)
-  await tap(page, /Next turn/);
+  await tap(page, /^(✓ )?Next turn →/);
   await tap(page, /^\+1$/);
   check(/Star space · 1/i.test(await bodyText(page)), "landing on 1 prompts a star chip");
   await tap(page, /Got the chip/);
 
   // Egg → 6, then → 7 (arrow forward 3 → 10)
-  await tap(page, /Next turn/);
+  await tap(page, /^(✓ )?Next turn →/);
   await tap(page, /^\+6$/);
   check(!/space · 6/i.test(await bodyText(page)), "plain space 6 has no prompt");
   await tap(page, /^\+1$/);
@@ -215,15 +215,48 @@ console.log("\nWild Wilds race: track spaces, trip skip, undo");
   check(pos.Egg === 10, `arrow moves Egg to 10 (got ${pos.Egg})`);
 
   // Back to Hare, who is tripped and must skip
-  await tap(page, /Next turn/, 400);
+  await tap(page, /^(✓ )?Next turn →/, 400);
   check(/Tripped: skip main move/i.test(await bodyText(page)), "tripped Hare is prompted to skip");
   await tap(page, /Done — next turn/, 400);
   check(!/Tripped/.test((await positions(page), await bodyText(page))), "Hare stands back up after skipping");
 
-  // Undo the arrow move: Egg goes back to 7
-  await tap(page, /^Undo: Egg \+3/);
+  // Undo steps back across turns: the skip, then each hand-off, then moves.
+  const undoLabel = async () =>
+    (await page.locator("button").evaluateAll((els) => els.map((el) => el.innerText.replace(/\s+/g, " ").trim()))).find((t) =>
+      /^Undo:/.test(t)
+    ) || "";
+  const turnOf = async () => {
+    const rows = await page.locator("button").evaluateAll((els) => els.map((el) => el.innerText.replace(/\s+/g, " ").trim()));
+    const row = rows.find((t) => /\d+\/30/.test(t) && /Their turn/.test(t));
+    return row ? (row.match(/(Hare|Banana|Egg)/) || [])[1] : null;
+  };
+  const hareTripped = async () => {
+    const rows = await page.locator("button").evaluateAll((els) => els.map((el) => el.innerText.replace(/\s+/g, " ").trim()));
+    return rows.some((t) => /Hare/.test(t) && /\d+\/30/.test(t) && /Tripped/i.test(t));
+  };
+
+  check(/Hare's skip/.test(await undoLabel()), `Undo offers Hare's skip first ("${await undoLabel()}")`);
+  await tap(page, /^Undo:/, 400);
+  check((await turnOf()) === "Hare" && (await hareTripped()), "undoing the skip: Hare's turn again, tripped");
+  check(!/Tripped: skip main move/i.test(await bodyText(page)), "undoing the skip doesn't re-open the prompt");
+
+  // Passing the turn from a tripped Hare who hasn't moved counts as the skip.
+  await tap(page, /^(✓ )?Next turn →/, 400);
+  check((await turnOf()) === "Banana" && !(await hareTripped()), "Next turn from tripped Hare: Banana's turn, Hare stands up");
+
+  check(/Next turn \(Banana\)/.test(await undoLabel()), `Undo offers that hand-off ("${await undoLabel()}")`);
+  await tap(page, /^Undo:/, 400);
+  check((await turnOf()) === "Hare" && (await hareTripped()), "undoing it: Hare's turn, tripped again");
+
+  check(/Next turn \(Hare\)/.test(await undoLabel()), `then the hand-off to Hare ("${await undoLabel()}")`);
+  await tap(page, /^Undo:/, 400);
   pos = await positions(page);
-  check(pos.Egg === 7, `undo puts Egg back on 7 (got ${pos.Egg})`);
+  check((await turnOf()) === "Egg" && pos.Egg === 10, `back to Egg's turn, Egg still on 10 (turn: ${await turnOf()}, Egg ${pos.Egg})`);
+
+  check(/Egg \+3/.test(await undoLabel()), `then Egg's arrow move ("${await undoLabel()}")`);
+  await tap(page, /^Undo:/, 400);
+  pos = await positions(page);
+  check(pos.Egg === 7 && (await turnOf()) === "Egg", `undo puts Egg back on 7, still Egg's turn (got ${pos.Egg})`);
 
   // Tabs open mid-race fit the phone and render without errors
   await visitTabs(page, "race");

@@ -85,6 +85,13 @@ npm run check
   Wild Wilds effect spaces live in `WILD_WILDS_SPACES` and were checked against the
   physical board: stars 1 and 13; trips 5, 17, 26; arrows +3 at 7, +1 at 11, −4 at 16,
   +2 at 23, −2 at 24.
+- **Undo** works on one history (`moveHistory`) of moves, "Next turn" hand-offs and
+  trip skips, newest first. Every entry records whose turn it was before it
+  (`prevActiveRacerId`, `prevTurnHasMoved`) so Undo restores the turn exactly. Anything
+  new that changes the race (positions, turn, trips, chips) must add an entry or attach
+  to one, or Undo will drift from the table. Entries with no `kind` are old saved moves.
+  The automatic hand-off when a racer finishes is part of that move's entry. Tapping a
+  row to fix whose turn it is is *not* recorded.
 - **Animations** must respect `prefers-reduced-motion`.
 
 ## Layout
@@ -100,6 +107,5 @@ archive/                      old versions, reference only (not built or linted)
 
 ## Known issues (October 2026 review)
 
-- Undo doesn't step back across turns or restore a trip already skipped.
 - The spectator snapshot doesn't include the track or who is tripped.
 - `App()` is ~1,600 lines; the file is ~7,200.

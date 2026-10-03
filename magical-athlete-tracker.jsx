@@ -1177,6 +1177,33 @@ export default function App() {
   };
   const advanceTurn = () => advanceTurnFrom(null);
 
+  // The "Next turn" button. Unlike the automatic hand-off when a racer
+  // finishes, this goes in the undo history, so Undo can step back across
+  // turns. If the racer whose turn is ending is still tripped and hasn't
+  // moved, their turn passing *is* their skip, so they stand back up (this is
+  // what happens after an undone skip is played again via Next turn).
+  const nextTurn = () => {
+    const current = racers.find((r) => r.id === activeRacerId);
+    const clearsTrip = !!(current && current.tripped && !turnHasMoved);
+    if (clearsTrip) {
+      setRacers((prev) => prev.map((r) => (r.id === current.id ? { ...r, tripped: false } : r)));
+    }
+    const eligible = validRacers.filter((r) => !r.finished);
+    const currentIdx = eligible.findIndex((r) => r.id === activeRacerId);
+    const next = eligible.length ? eligible[currentIdx === -1 ? 0 : (currentIdx + 1) % eligible.length] : null;
+    setMoveHistory((h) => [
+      {
+        kind: "turn",
+        toName: next ? next.name : "",
+        prevActiveRacerId: activeRacerId,
+        prevTurnHasMoved: turnHasMoved,
+        clearedTripId: clearsTrip ? current.id : null,
+      },
+      ...h,
+    ]);
+    advanceTurnFrom(clearsTrip ? current.id : null);
+  };
+
   const moveRacer = (id, delta) => {
     if (status !== "racing") return;
     const racer = racers.find((r) => r.id === id);
@@ -1229,15 +1256,56 @@ export default function App() {
       ...log,
     ]);
     setMoveHistory((h) => [
-      { logId, racerId: id, racerName: racer.name, delta, prevPosition, prevFinishOrder, racesJustEnded },
+      {
+        kind: "move",
+        logId,
+        racerId: id,
+        racerName: racer.name,
+        delta,
+        prevPosition,
+        prevFinishOrder,
+        racesJustEnded,
+        prevActiveRacerId: activeRacerId,
+        prevTurnHasMoved: turnHasMoved,
+      },
       ...h,
     ]);
   };
 
+  // Undo steps back through one history, newest first: moves, "Next turn"
+  // hand-offs and trip skips, in the order they happened. Each entry remembers
+  // whose turn it was before it, so the turn is put back exactly.
+  // (Entries saved before October 2026 have no `kind` and no turn record; they
+  // are moves and fall back to the old best-guess turn handling.)
   const undoLastMove = () => {
     if (moveHistory.length === 0) return;
     const last = moveHistory[0];
+    const kind = last.kind || "move";
     setPendingEffect(null);
+    setMoveHistory((h) => h.slice(1));
+
+    const restoreTurn = () => {
+      setActiveRacerId(last.prevActiveRacerId);
+      setTurnHasMoved(!!last.prevTurnHasMoved);
+    };
+
+    if (kind === "turn") {
+      // Hand the turn back; if passing it stood a tripped racer up, trip them again.
+      if (last.clearedTripId) {
+        setRacers((prev) => prev.map((r) => (r.id === last.clearedTripId ? { ...r, tripped: true } : r)));
+      }
+      restoreTurn();
+      return;
+    }
+
+    if (kind === "skip") {
+      // Back to the tripped racer's turn, lying down again. No prompt: Next
+      // turn (or Undo again) carries on from here.
+      setRacers((prev) => prev.map((r) => (r.id === last.racerId ? { ...r, tripped: true } : r)));
+      restoreTurn();
+      return;
+    }
+
     setRacers((prev) =>
       prev.map((r) =>
         r.id === last.racerId
@@ -1263,19 +1331,16 @@ export default function App() {
       setStatus("racing");
       setSavedThisRace(false);
       setSaveError(null);
-      // The undone move both finished and handed off this racer — restore
-      // them as active, with a clean (not-yet-moved) turn.
+    }
+    if ("prevActiveRacerId" in last) {
+      restoreTurn();
+    } else if (last.racesJustEnded) {
       setActiveRacerId(last.racerId);
       setTurnHasMoved(false);
     } else if (last.racerId === activeRacerId) {
-      // Undoing the active racer's own most recent move — their turn goes
-      // back to not-yet-moved. If they'd made an earlier move too this same
-      // turn, this under-counts rather than over-claims, which is the safer
-      // direction for what's just a convenience indicator.
       setTurnHasMoved(false);
     }
     setTurnLog((log) => log.filter((t) => t.id !== last.logId));
-    setMoveHistory((h) => h.slice(1));
   };
 
   const setPositionDirect = (id, val) => {
@@ -1296,7 +1361,11 @@ export default function App() {
     const { effect } = pending;
     // Remember on the racer's latest move what this prompt changed, so Undo can reverse it.
     const noteOnLastMove = (patch) =>
-      setMoveHistory((h) => (h.length && h[0].racerId === racer.id ? [{ ...h[0], ...patch }, ...h.slice(1)] : h));
+      setMoveHistory((h) =>
+        h.length && (h[0].kind || "move") === "move" && h[0].racerId === racer.id
+          ? [{ ...h[0], ...patch }, ...h.slice(1)]
+          : h
+      );
 
     if (effect.type === "arrow") {
       // A separate move; if it lands on another effect space, moveRacer prompts again.
@@ -1306,6 +1375,16 @@ export default function App() {
       noteOnLastMove({ trippedSet: true });
     } else if (effect.type === "tripSkip") {
       setRacers((prev) => prev.map((r) => (r.id === racer.id ? { ...r, tripped: false } : r)));
+      setMoveHistory((h) => [
+        {
+          kind: "skip",
+          racerId: racer.id,
+          racerName: racer.name,
+          prevActiveRacerId: activeRacerId,
+          prevTurnHasMoved: turnHasMoved,
+        },
+        ...h,
+      ]);
       advanceTurnFrom(racer.id);
     } else if (effect.type === "star") {
       // The chip is also tallied for the racer's player, so the end-of-race
@@ -2207,7 +2286,7 @@ export default function App() {
                 gameSession={gameSession}
                 activeRacerId={activeRacerId}
                 setActiveRacer={setActiveTurn}
-                advanceTurn={advanceTurn}
+                advanceTurn={nextTurn}
                 turnHasMoved={turnHasMoved}
                 onboardingSeen={onboardingSeen}
                 dismissOnboarding={dismissOnboarding}
@@ -6704,8 +6783,7 @@ function TrackTab({
           className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium mb-3"
           style={{ background: "var(--paper)", color: "var(--ink)", border: "2px solid var(--ink)" }}
         >
-          <RotateCcw size={15} /> Undo: {moveHistory[0].racerName}{" "}
-          {moveHistory[0].delta >= 0 ? `+${moveHistory[0].delta}` : moveHistory[0].delta}
+          <RotateCcw size={15} /> Undo: {undoLabel(moveHistory[0])}
         </button>
       )}
 
@@ -6780,6 +6858,14 @@ function TrackTab({
       )}
     </div>
   );
+}
+
+// What the Undo button will undo, in a few words.
+function undoLabel(entry) {
+  const kind = entry.kind || "move";
+  if (kind === "turn") return entry.toName ? `Next turn (${entry.toName})` : "Next turn";
+  if (kind === "skip") return `${entry.racerName}'s skip`;
+  return `${entry.racerName} ${entry.delta >= 0 ? `+${entry.delta}` : entry.delta}`;
 }
 
 // Pip layouts for each die face (3x3 grid, 1 = pip present).
