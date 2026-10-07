@@ -119,7 +119,21 @@ npm run check
   to one, or Undo will drift from the table. Entries with no `kind` are old saved moves.
   The automatic hand-off when a racer finishes is part of that move's entry. Tapping a
   row to fix whose turn it is is *not* recorded.
-- **Animations** must respect `prefers-reduced-motion`.
+- **Animations** must respect `prefers-reduced-motion` (the macOS / Windows /
+  iOS / Android "Reduce Motion" setting; WCAG 2.1 2.3.3). Two layers:
+  - CSS: the `@media (prefers-reduced-motion: reduce)` block in the app's
+    `<style>` has a catch-all that makes every animation and transition instant
+    (it also beats inline `transition` styles), plus specific rules for the rest.
+    A looping animation that is also a cue (Next turn pulse) becomes a static
+    state, not nothing.
+  - JS: anything driven from code checks `prefersReducedMotion()` — the dice
+    tumble, draft roll-off flicker, the ticket-tear hand-off, the race-list
+    reorder slide, the intro tour's smooth scroll. Rapid flicker is the one that
+    matters most for epilepsy, so never add a timer that cycles visuals without
+    checking it.
+  - `tests/smoke.mjs` has a "Reduce Motion" section that emulates the setting and
+    fails if anything loops or runs longer than a blink. Rolling the dice and
+    starting a game take one fewer tap with it on (no ticket flip).
 
 ## Layout
 

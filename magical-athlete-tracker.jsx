@@ -2099,6 +2099,25 @@ export default function App() {
         }
         .rank-pop { animation: rankPop 0.3s ease-out both; }
         @media (prefers-reduced-motion: reduce) {
+          /* Reduce Motion (macOS / Windows / iOS / Android accessibility setting):
+             everything changes instantly instead of animating. This catch-all
+             also beats inline transition styles and covers anything added
+             later; the rules below it tidy up the cases that need more than
+             "instant" (a looping pulse that is also a cue, decorations). JS-driven
+             motion checks prefersReducedMotion() separately. */
+          *, *::before, *::after {
+            animation-duration: 0.01ms !important;
+            animation-delay: 0s !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+            transition-delay: 0s !important;
+            scroll-behavior: auto !important;
+          }
+          .trophy-glow, .winner-pop, .dice-tumble { animation: none !important; }
+          .confetti-piece { display: none; }
+          /* The Next turn pulse tells the host the move is done, so keep that
+             cue as a steady glow rather than losing it. */
+          .next-turn-ready { animation: none !important; box-shadow: 5px 5px 0px var(--ink), 0 0 16px 2px var(--yellow) !important; }
           .rank-pop, .lp-stamp, .lp-squash, .lp-stub-tear, .lp-leave, .lp-shake, .lp-settle, .lp-arrive > * { animation: none !important; }
           .dice-shake, .dice-land { animation: none !important; }
           .lp-title, .lp-rise, .lp-host-ticket { animation: none !important; }
@@ -2846,7 +2865,7 @@ function IntroTour({ onDone }) {
       onDone();
       return;
     }
-    el.scrollTo({ left: (index + 1) * el.clientWidth, behavior: "smooth" });
+    el.scrollTo({ left: (index + 1) * el.clientWidth, behavior: prefersReducedMotion() ? "auto" : "smooth" });
   };
 
   return (
@@ -6647,12 +6666,7 @@ function TrackTab({
 
     const orderChanged = prevOrderKey.current !== null && prevOrderKey.current !== orderKey;
     if (orderChanged && status === "racing") {
-      const reduced =
-        typeof window !== "undefined" &&
-        window.matchMedia &&
-        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-      if (!reduced) {
+      if (!prefersReducedMotion()) {
         Object.entries(tops).forEach(([id, top]) => {
           const el = rowRefs.current[id];
           const old = prevTops.current[id];
@@ -7006,22 +7020,30 @@ function DiceTab() {
   );
 
   const doRoll = () => {
-    setRolling(true);
     setRolled(true);
     clearTimeout(timeoutRef.current);
     clearInterval(tumbleRef.current);
-    // Cosmetic-only: cycle random faces while it "tumbles" — the real,
-    // fairness-critical result still comes from rollDice() below, once.
-    tumbleRef.current = setInterval(() => {
-      setDisplayDice([1 + Math.floor(Math.random() * 6), 1 + Math.floor(Math.random() * 6)]);
-    }, 80);
-    timeoutRef.current = setTimeout(() => {
-      clearInterval(tumbleRef.current);
+    // The real, fairness-critical result comes from rollDice(), once.
+    const settle = () => {
       const result = rollDice(excludeDoubles);
       setDice(result);
       setDisplayDice(result);
       setRolling(false);
       setHistory((h) => [{ id: uid(), dice: result }, ...h].slice(0, 12));
+    };
+    // Reduce Motion: no tumble and no flickering faces, just the result.
+    if (prefersReducedMotion()) {
+      settle();
+      return;
+    }
+    setRolling(true);
+    // Cosmetic-only: cycle random faces while it "tumbles".
+    tumbleRef.current = setInterval(() => {
+      setDisplayDice([1 + Math.floor(Math.random() * 6), 1 + Math.floor(Math.random() * 6)]);
+    }, 80);
+    timeoutRef.current = setTimeout(() => {
+      clearInterval(tumbleRef.current);
+      settle();
     }, 450);
   };
 

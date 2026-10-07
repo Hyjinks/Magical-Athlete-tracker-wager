@@ -76,8 +76,8 @@ const browser = await chromium.launch();
 // (sharedBackend "local"), and two pages in one context play host and
 // spectator. "firebase" runs the real Firestore code with Google's servers
 // unreachable, to check the app copes.
-async function openApp({ serviceWorkers = "block", sharedBackend = "local" } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, serviceWorkers });
+async function openApp({ serviceWorkers = "block", sharedBackend = "local", reducedMotion = "no-preference" } = {}) {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, serviceWorkers, reducedMotion });
   await ctx.route(/fonts\.(googleapis|gstatic)\.com/, (route) =>
     route.fulfill({ status: 200, contentType: "text/css", body: "" })
   );
@@ -180,14 +180,15 @@ async function visitTabs(page, stage) {
   }
 }
 
-async function startHosting(page) {
+// With Reduce Motion on, the ticket doesn't flip, so one tap goes straight in.
+async function startHosting(page, { reducedMotion = false } = {}) {
   await tap(page, /^Skip$/).catch(() => {}); // first-run tips, if shown
   await tap(page, /Let's race/, 600); // the ticket flips
-  await tap(page, /Let's race/, 1200);
+  if (!reducedMotion) await tap(page, /Let's race/, 1200);
 }
 
-async function setUpRace(page, track) {
-  await startHosting(page);
+async function setUpRace(page, track, opts) {
+  await startHosting(page, opts);
   await tap(page, track === "wild" ? /^Wild Wilds/ : /^Mild Mile/);
   await tap(page, /^Add racer$/);
   const players = page.locator('input[placeholder="Who is racing?"]');
@@ -342,6 +343,65 @@ async function suite(target) {
     await setUpRace(page, "mild");
     await tap(page, /^\+5$/);
     check(!/space · 5/i.test(await bodyText(page)), "Mild Mile has no space prompts");
+    check(errors.length === 0, `no errors${errors.length ? `: ${errors.join(" / ")}` : ""}`);
+    await ctx.close();
+  }
+
+  // ---------------------------------------------------------------------------
+  console.log("\nReduce Motion (macOS / Windows accessibility setting)");
+  {
+    // Anything still looping or lasting longer than a blink, from CSS animations
+    // and transitions alike.
+    const motion = (page) =>
+      page.evaluate(() =>
+        document
+          .getAnimations()
+          .map((a) => ({ name: a.animationName || a.transitionProperty || "?", ms: a.effect.getComputedTiming().endTime }))
+          .filter((x) => x.ms > 1)
+          .map((x) => `${x.name}${x.ms === Infinity ? " (loops)" : ` (${Math.round(x.ms)}ms)`}`)
+      );
+
+    // Control: with the setting off the landing screen does loop (otherwise the
+    // checks below would pass for the wrong reason).
+    {
+      const { ctx, page } = await openApp();
+      const found = await motion(page);
+      check(found.some((x) => x.includes("(loops)")), "control: without Reduce Motion the landing screen animates");
+      await ctx.close();
+    }
+
+    const { ctx, page, errors } = await openApp({ reducedMotion: "reduce" });
+    let found = await motion(page);
+    check(found.length === 0, `landing: nothing animates${found.length ? ` — ${[...new Set(found)].join(", ")}` : ""}`);
+
+    await setUpRace(page, "wild", { reducedMotion: true });
+    await tap(page, /^\+5$/);
+    check(/Trip space · 5/i.test(await bodyText(page)), "race still works: landing on 5 prompts a trip");
+    await tap(page, /mark as tripped/);
+    await tap(page, /^(✓ )?Next turn →/);
+    await tap(page, /^\+1$/);
+    await page.waitForTimeout(300);
+    found = await motion(page);
+    check(found.length === 0, `race: nothing animates, even the Next turn cue${found.length ? ` — ${[...new Set(found)].join(", ")}` : ""}`);
+    // The pulse is the cue that a move is done; with motion off it stays lit
+    // (a second, glow-coloured shadow) instead of pulsing.
+    const cue = await page.evaluate(() => {
+      const b = [...document.querySelectorAll("button")].find((el) => /^✓ Next turn/.test(el.innerText.trim()));
+      if (!b) return null;
+      const s = getComputedStyle(b);
+      return { animation: s.animationName, shadows: (s.boxShadow.match(/rgb/g) || []).length };
+    });
+    check(cue && cue.animation === "none" && cue.shadows >= 2, `Next turn keeps a steady glow as its cue${cue ? "" : " (button not found)"}`);
+
+    // Dice: the result appears at once, with no flickering faces. (A pending
+    // space prompt blocks the tabs, so dismiss the star prompt first.)
+    await tap(page, /Got the chip/);
+    await tap(page, /^Dice$/, 300);
+    await tap(page, /^Roll dice$/, 60);
+    const total = await bodyText(page);
+    check(/Total \d+/.test(total), "dice: the result shows immediately, no tumble");
+    check((await motion(page)).length === 0, "dice: nothing animates");
+
     check(errors.length === 0, `no errors${errors.length ? `: ${errors.join(" / ")}` : ""}`);
     await ctx.close();
   }
