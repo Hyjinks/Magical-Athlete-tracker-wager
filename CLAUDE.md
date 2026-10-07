@@ -119,6 +119,15 @@ npm run check
   to one, or Undo will drift from the table. Entries with no `kind` are old saved moves.
   The automatic hand-off when a racer finishes is part of that move's entry. Tapping a
   row to fix whose turn it is is *not* recorded.
+- **Color-safe theme (`cb`).** The third look in Settings, built for colour-blind
+  players and WCAG 2.1 AA. Rules for anything new: never signal state by colour
+  alone — pair it with text, a sign (+/−), ▲/▼ or a tick. Selected chips add
+  `<span className="cb-tick">✓ </span>` (hidden outside this theme). Racer dots use
+  `<RacerDot color={...} />` and bars use `racerCss(color)` + class `ma-rbar`, so
+  each racer gets a shape and an Okabe-Ito shade in this theme. "red" is burnt
+  orange and "green" is deep blue here; any new theme variable needs a value in
+  all three themes and, if text sits on it, a pair added to `tests/contrast.mjs`
+  (4.5:1, run by `npm test`).
 - **Animations** must respect `prefers-reduced-motion` (the macOS / Windows /
   iOS / Android "Reduce Motion" setting; WCAG 2.1 2.3.3). Two layers:
   - CSS: the `@media (prefers-reduced-motion: reduce)` block in the app's

@@ -155,6 +155,7 @@ const THEMES = {
     highlight: "#F5E3B3",
     onBg: "#FDE7C8",
     onBgMuted: "#FCEBC9",
+    bronze: "#9B6B4A",
   },
   calm: {
     label: "Calm",
@@ -171,8 +172,100 @@ const THEMES = {
     highlight: "#E4D8B4",
     onBg: "#E8DCC0",
     onBgMuted: "#B9CDBF",
+    bronze: "#9B6B4A",
+  },
+  // Colour-blind-safe look (WCAG 2.1 AA). Every text/background pairing the app
+  // uses is >= 4.5:1 (checked by tests/contrast.mjs). "green" is a deep blue and
+  // "red" a burnt orange, so good/bad never rely on a red-green split, and the
+  // two differ a lot in lightness as well as hue. Racer colours are swapped for
+  // the Okabe-Ito set (rc0-rc9) and each racer also gets a shape (RacerShape),
+  // so nothing is told apart by colour alone.
+  cb: {
+    label: "Color-safe",
+    bg: "#0B2545",
+    paper: "#FFFFFF",
+    paper2: "#FFFFFF",
+    ink: "#10161F",
+    red: "#A63F00",
+    yellow: "#F2C230",
+    green: "#00376A",
+    purple: "#5B3A8E",
+    muted: "#4A5568",
+    mutedGreen: "#00376A",
+    highlight: "#DCE6F2",
+    onBg: "#F2F6FC",
+    onBgMuted: "#C9D6EA",
+    bronze: "#7A4A22",
+    racerColors: [
+      "#A63F00", // dark vermillion
+      "#F0E442", // yellow
+      "#5FD6AA", // light bluish green
+      "#56B4E9", // sky blue
+      "#0072B2", // blue
+      "#CC79A7", // reddish purple
+      "#E69F00", // orange
+      "#999999", // grey
+      "#332288", // indigo
+      "#882255", // wine
+    ],
   },
 };
+
+// One shape per PALETTE slot (same order), so a racer can be told apart without
+// seeing colour. Only drawn in the Color-safe theme. Points are on a 16x16 box.
+const RACER_SHAPES = [
+  { name: "circle", svg: <circle cx="8" cy="8" r="6" /> },
+  { name: "square", svg: <rect x="2.5" y="2.5" width="11" height="11" /> },
+  { name: "triangle", svg: <polygon points="8,2 14.5,13.5 1.5,13.5" /> },
+  { name: "diamond", svg: <polygon points="8,1.5 14.5,8 8,14.5 1.5,8" /> },
+  { name: "inverted triangle", svg: <polygon points="1.5,2.5 14.5,2.5 8,14" /> },
+  { name: "star", svg: <polygon points="8,1.5 9.9,6 14.7,6.2 11,9.3 12.2,14 8,11.4 3.8,14 5,9.3 1.3,6.2 6.1,6" /> },
+  { name: "hexagon", svg: <polygon points="4.5,2 11.5,2 15,8 11.5,14 4.5,14 1,8" /> },
+  { name: "plus", svg: <polygon points="6,1.5 10,1.5 10,6 14.5,6 14.5,10 10,10 10,14.5 6,14.5 6,10 1.5,10 1.5,6 6,6" /> },
+  { name: "cross", svg: <polygon points="3.5,1.5 8,6 12.5,1.5 14.5,3.5 10,8 14.5,12.5 12.5,14.5 8,10 3.5,14.5 1.5,12.5 6,8 1.5,3.5" /> },
+  { name: "ring", svg: <circle cx="8" cy="8" r="5" fill="none" strokeWidth="3.5" /> },
+];
+const racerSlot = (hex) => PALETTE.indexOf(hex);
+// CSS colour for a racer: the theme's safe shade when it has one (--rcN), else
+// the racer's own colour.
+const racerCss = (hex) => {
+  const i = racerSlot(hex);
+  return i < 0 ? hex : `var(--rc${i}, ${hex})`;
+};
+const racerShapeName = (hex) => (RACER_SHAPES[racerSlot(hex)] || RACER_SHAPES[0]).name;
+
+// Shape marker; hidden by CSS unless the Color-safe theme (.ma-cb) is on.
+function RacerShape({ color, size = 14 }) {
+  const shape = RACER_SHAPES[racerSlot(color)] || RACER_SHAPES[0];
+  return (
+    <svg
+      className="rd-shape shrink-0"
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      aria-hidden="true"
+      focusable="false"
+      style={{ fill: racerCss(color), stroke: "var(--ink)", strokeWidth: 1.5, strokeLinejoin: "round" }}
+    >
+      {shape.svg}
+    </svg>
+  );
+}
+
+// The little colour dot beside a racer's name. In the Color-safe theme it is
+// swapped for the racer's shape (the name always sits next to it).
+function RacerDot({ color, size = 10 }) {
+  return (
+    <>
+      <span
+        className="rd-dot rounded-full inline-block shrink-0"
+        style={{ width: size, height: size, background: color }}
+        aria-hidden="true"
+      />
+      <RacerShape color={color} size={size + 6} />
+    </>
+  );
+}
 
 const themeVars = (t) => ({
   "--bg": t.bg,
@@ -188,6 +281,8 @@ const themeVars = (t) => ({
   "--highlight": t.highlight,
   "--onBg": t.onBg,
   "--onBgMuted": t.onBgMuted,
+  "--bronze": t.bronze,
+  ...Object.fromEntries((t.racerColors || []).map((c, i) => [`--rc${i}`, c])),
 });
 
 const emptyRacer = (i) => ({
@@ -1829,13 +1924,22 @@ export default function App() {
 
   return (
     <div
-      className="min-h-screen"
+      className={`min-h-screen${themeId === "cb" ? " ma-cb" : ""}`}
       style={{ ...themeVars(theme), background: "var(--bg)", fontFamily: "'Nunito', sans-serif" }}
     >
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Luckiest+Guy&family=Nunito:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap');
         .font-display { font-family: 'Luckiest Guy', cursive; font-weight: 400; letter-spacing: 0.02em; }
         .font-mono { font-family: 'IBM Plex Mono', monospace; }
+        /* Color-safe theme: shapes stand in for racer colour dots, bars get an
+           outline (non-text contrast), and focus is a two-tone ring that shows
+           on both the dark page and the light cards. */
+        .rd-shape, .cb-tick { display: none; }
+        .ma-cb .rd-shape { display: inline-block; }
+        .ma-cb .cb-tick { display: inline; }
+        .ma-cb .rd-dot { display: none; }
+        .ma-cb .ma-rbar { box-shadow: inset 0 0 0 1.5px var(--ink); }
+        .ma-cb :focus-visible { outline: 3px solid #FFFFFF; outline-offset: 2px; box-shadow: 0 0 0 5px #10161F; }
         .comic-title {
           -webkit-text-stroke: 2.5px #1A1408;
           paint-order: stroke fill;
@@ -2685,13 +2789,14 @@ function SettingsPanel({ houseRules, updateHouseRule, themeId, changeTheme, onCl
           Close
         </button>
       </div>
-      <div className="flex items-center justify-between gap-2 mb-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <div>
           <p className="text-sm font-medium" style={{ color: "var(--ink)" }}>
             Look
           </p>
           <p className="text-xs" style={{ color: "var(--muted)" }}>
-            Poster is bold and bright; Calm is quieter.
+            Poster is bold and bright; Calm is quieter; Color-safe adds shapes and
+            colour-blind-friendly colours.
           </p>
         </div>
         <ThemeSwitcher themeId={themeId} changeTheme={changeTheme} />
@@ -3515,7 +3620,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
               <span className="font-mono text-xs w-4 text-center" style={{ color: "var(--red)" }}>
                 {i + 1}
               </span>
-              <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: r.color }} />
+              <RacerDot color={r.color} size={10} />
               <span className="flex-1 truncate">{r.name}</span>
               {r.finished && (
                 <span
@@ -3556,7 +3661,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
               style={{ background: "var(--paper)" }}
             >
               <span className="flex items-center gap-2 min-w-0">
-                <span className="w-2.5 h-2.5 rounded-full inline-block shrink-0" style={{ background: r.color }} />
+                <RacerDot color={r.color} size={10} />
                 <span className="truncate">{r.name}</span>
               </span>
               <div className="flex gap-3 shrink-0">
@@ -3617,7 +3722,8 @@ function SpectatorView({ onLeave, initialPin = "" }) {
                     borderColor: betRacer === r.id ? "var(--green)" : "var(--ink)",
                   }}
                 >
-                  <span className="w-2 h-2 rounded-full inline-block" style={{ background: r.color }} />
+                  {betRacer === r.id && <span className="cb-tick font-bold" aria-hidden="true">✓</span>}
+                  <RacerDot color={r.color} size={8} />
                   {r.name}
                   <span className="font-mono text-xs opacity-80">
                     {shownOdds ? `×${shownOdds.toFixed(2)}` : "posting…"}
@@ -4518,7 +4624,7 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
                 borderColor: variantId === id ? "var(--green)" : "var(--ink)",
               }}
             >
-              {v.label}
+              {variantId === id && <span className="cb-tick" aria-hidden="true">✓ </span>}{v.label}
             </button>
           ))}
         </div>
@@ -4656,7 +4762,7 @@ function DraftAssistant({ onApply, onCancel, onboardingSeen, dismissOnboarding, 
                 color: rollMode === id ? "var(--paper2)" : "var(--muted)",
               }}
             >
-              {lbl}
+              {rollMode === id && <span className="cb-tick" aria-hidden="true">✓ </span>}{lbl}
             </button>
           ))}
         </div>
@@ -5278,7 +5384,7 @@ function SetupTab({
                   opacity: locked && !on ? 0.5 : 1,
                 }}
               >
-                <span className="block text-sm font-bold">{label}</span>
+                <span className="block text-sm font-bold">{on && <span className="cb-tick" aria-hidden="true">✓ </span>}{label}</span>
                 <span className="block font-mono text-xs">{STANDARD_TRACK_LENGTH} spaces · {sub}</span>
               </button>
             );
@@ -5360,7 +5466,7 @@ function SetupTab({
                       aria-label={
                         takenBy
                           ? `Colour already used by ${takenBy.name || "another racer"}`
-                          : `Set ${r.name || "racer"}'s color`
+                          : `Set ${r.name || "racer"}'s color (${racerShapeName(c)})`
                       }
                       aria-pressed={r.color === c}
                       style={{ background: "transparent", opacity: takenBy ? 0.45 : 1 }}
@@ -5370,7 +5476,7 @@ function SetupTab({
                         style={{
                           width: 26,
                           height: 26,
-                          background: c,
+                          background: racerCss(c),
                           border: "3px solid",
                           borderColor: r.color === c ? "var(--ink)" : "transparent",
                           color: "var(--ink)",
@@ -5379,7 +5485,7 @@ function SetupTab({
                           lineHeight: 1,
                         }}
                       >
-                        {takenBy ? "✕" : null}
+                        {takenBy ? "✕" : <RacerShape color={c} size={16} />}
                       </span>
                     </button>
                   );
@@ -5517,20 +5623,17 @@ function ReplayView({ racers, turnLog, trackLength }) {
                 zIndex: currentMove && currentMove.racerName === r.name ? 1 : 0,
               }}
             >
-              <span
-                className="w-2.5 h-2.5 rounded-full inline-block shrink-0"
-                style={{ background: r.color }}
-              />
+              <RacerDot color={r.color} size={10} />
               <span className="w-20 truncate shrink-0">{r.name}</span>
               <div
                 className="relative h-2 rounded-full flex-1 overflow-hidden"
                 style={{ background: "var(--highlight)" }}
               >
                 <div
-                  className="absolute top-0 left-0 h-full rounded-full"
+                  className="ma-rbar absolute top-0 left-0 h-full rounded-full"
                   style={{
                     width: `${(pos / trackLength) * 100}%`,
-                    background: r.color,
+                    background: racerCss(r.color),
                     transition: "width 450ms cubic-bezier(0.4, 0, 0.2, 1)",
                   }}
                 />
@@ -5739,7 +5842,7 @@ function BettingTab(props) {
           </div>
           {bronzeOn && racePlayers.length > 0 && (
             <div className="mt-3">
-              <p className="text-xs font-mono uppercase mb-1" style={{ color: "#9B6B4A" }}>
+              <p className="text-xs font-mono uppercase mb-1" style={{ color: "var(--bronze)" }}>
                 Bronze chips (star spaces)
               </p>
               <p className="text-xs mb-1.5" style={{ color: "var(--muted)" }}>
@@ -6028,10 +6131,7 @@ function BettingTab(props) {
                     style={{ background: "var(--paper)" }}
                   >
                     <span className="flex items-center gap-2 min-w-0">
-                      <span
-                        className="w-2.5 h-2.5 rounded-full inline-block shrink-0"
-                        style={{ background: r.color }}
-                      />
+                      <RacerDot color={r.color} size={10} />
                       <span className="truncate">{r.name}</span>
                     </span>
                     <div className="flex gap-3 shrink-0">
@@ -6105,6 +6205,7 @@ function BettingTab(props) {
                   borderColor: betBettor === b.name ? "var(--red)" : "var(--ink)",
                 }}
               >
+                {betBettor === b.name && <span className="cb-tick" aria-hidden="true">✓ </span>}
                 {b.name}
               </button>
             ))}
@@ -6155,7 +6256,8 @@ function BettingTab(props) {
                     borderColor: betRacer === r.id ? "var(--green)" : "var(--ink)",
                   }}
                 >
-                  <span className="w-2 h-2 rounded-full inline-block" style={{ background: r.color }} />
+                  {betRacer === r.id && <span className="cb-tick font-bold" aria-hidden="true">✓</span>}
+                  <RacerDot color={r.color} size={8} />
                   {r.name}
                   <span className="font-mono text-xs opacity-80">×{shownOdds ? shownOdds.toFixed(2) : "—"}</span>
                 </button>
@@ -6369,7 +6471,7 @@ function SpaceEffectPrompt({ racer, pos, effect, trackLength, onConfirm, onDismi
             {title}
           </p>
           <p className="flex items-center justify-center gap-1.5 text-xs mt-1" style={{ color: "var(--muted)" }}>
-            <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: racer.color }} />
+            <RacerDot color={racer.color} size={10} />
             <span className="font-medium" style={{ color: "var(--ink)" }}>{racer.name}</span>
             {player && <span>· {player}</span>}
           </p>
@@ -6495,7 +6597,7 @@ function MoveControls({ racer, others, trackLength, moveRacer, setPositionDirect
                 style={{ background: "var(--paper)", borderColor: "var(--ink)", minHeight: 48 }}
                 aria-label={`Move ${racer.name} to ${o.name}'s space (${o.position})`}
               >
-                <span className="w-2 h-2 rounded-full inline-block" style={{ background: o.color }} />
+                <RacerDot color={o.color} size={8} />
                 {o.name}
                 <span className="font-mono text-xs" style={{ color: "var(--muted)" }}>
                   {o.position}
@@ -6563,7 +6665,7 @@ function ResolutionOrder({ racers, activeRacerId }) {
               <span className="font-mono text-xs font-bold w-5 h-5 shrink-0 rounded-full flex items-center justify-center" style={{ background: "var(--ink)", color: "var(--paper2)", minWidth: 0, minHeight: 0 }}>2</span>
               <div>
                 <p className="text-sm font-medium flex items-center gap-1.5" style={{ color: "var(--ink)" }}>
-                  <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: active.color }} />
+                  <RacerDot color={active.color} size={10} />
                   {active.name}'s own ability
                 </p>
                 <p className="text-xs" style={{ color: "var(--muted)" }}>The mover's power resolves next.</p>
@@ -6588,7 +6690,7 @@ function ResolutionOrder({ racers, activeRacerId }) {
                           opacity: o.finished ? 0.55 : 1,
                         }}
                       >
-                        <span className="w-2 h-2 rounded-full inline-block" style={{ background: o.color }} />
+                        <RacerDot color={o.color} size={8} />
                         {o.name}
                         {o.finished && <span aria-label="finished">🏁</span>}
                       </span>
@@ -6771,10 +6873,7 @@ function TrackTab({
                 >
                   {i + 1}
                 </span>
-                <span
-                  className="w-2.5 h-2.5 rounded-full inline-block shrink-0"
-                  style={{ background: r.color }}
-                />
+                <RacerDot color={r.color} size={10} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
                     {isActive && <span aria-hidden="true">🎲</span>}
@@ -6823,8 +6922,8 @@ function TrackTab({
                     style={{ background: "var(--highlight)" }}
                   >
                     <div
-                      className="absolute top-0 left-0 h-full rounded-full transition-all"
-                      style={{ width: `${(r.position / trackLength) * 100}%`, background: r.color }}
+                      className="ma-rbar absolute top-0 left-0 h-full rounded-full transition-all"
+                      style={{ width: `${(r.position / trackLength) * 100}%`, background: racerCss(r.color) }}
                     />
                   </div>
                 </div>
@@ -6933,7 +7032,7 @@ function TrackTab({
           <div className="space-y-1 max-h-52 overflow-y-auto">
             {turnLog.map((t) => (
               <div key={t.id} className="flex items-center gap-2 text-xs">
-                <span className="w-2 h-2 rounded-full inline-block" style={{ background: t.color }} />
+                <RacerDot color={t.color} size={8} />
                 <span className="font-medium">{t.racerName}</span>
                 <span className="font-mono" style={{ color: t.delta >= 0 ? "var(--green)" : "var(--red)" }}>
                   {t.delta >= 0 ? `+${t.delta}` : t.delta}
@@ -7428,7 +7527,7 @@ function HistoryTab({ historyIndex, setHistoryIndex, activeSessionId }) {
                       color: standingsScope === id ? "var(--paper2)" : "var(--muted)",
                     }}
                   >
-                    {lbl}
+                    {standingsScope === id && <span className="cb-tick" aria-hidden="true">✓ </span>}{lbl}
                   </button>
                 ))}
               </div>

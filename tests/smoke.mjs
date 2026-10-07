@@ -578,6 +578,44 @@ async function suite(target) {
   }
 
   // ---------------------------------------------------------------------------
+  console.log("\nColor-safe theme");
+  {
+    const { ctx, page, errors } = await openApp();
+    await startHosting(page);
+    await page.locator('button[aria-label="Settings"]').click({ force: true });
+    await page.waitForTimeout(300);
+    await tap(page, /^Color-safe$/, 400);
+    await tap(page, /^Close$/, 300);
+    await tap(page, /^Wild Wilds/);
+    await tap(page, /^Add racer$/);
+    const csPlayers = page.locator('input[placeholder="Who is racing?"]');
+    const csNames = page.locator('input[placeholder^="Racer"]');
+    for (const [i, [who, racer]] of [["Adam", "Hare"], ["Ann", "Banana"], ["Ari", "Egg"]].entries()) {
+      await csPlayers.nth(i).fill(who);
+      await csNames.nth(i).fill(racer);
+      await page.keyboard.press("Escape");
+    }
+    await visitTabs(page, "colorsafe-setup");
+    await tap(page, /^Racers$/, 400);
+    await tap(page, /^Lock roster/, 800);
+    await tap(page, /^Got it$/).catch(() => {});
+    check((await page.locator(".ma-cb").count()) === 1, "Color-safe theme switches on");
+    const shapes = await page.locator(".rd-shape").evaluateAll((els) => els.filter((el) => el.getBoundingClientRect().width > 0).length);
+    const dots = await page.locator(".rd-dot").evaluateAll((els) => els.filter((el) => el.getBoundingClientRect().width > 0).length);
+    check(shapes >= 3 && dots === 0, `racers show shapes instead of colour dots (${shapes} shapes, ${dots} dots)`);
+    // Each racer's shape differs, so two racers can't be confused without colour.
+    const kinds = await page.locator(".rd-shape").evaluateAll((els) =>
+      els.slice(0, 3).map((el) => el.innerHTML.replace(/\s+/g, ""))
+    );
+    check(new Set(kinds).size === Math.min(3, kinds.length), "the first three racers have three different shapes");
+    if (target === "web") check((await page.getAttribute('meta[name="theme-color"]', "content")) === "#0B2545", "status-bar colour follows the Color-safe theme");
+    await visitTabs(page, "colorsafe-race");
+    const crashes = errors.filter((e) => e.startsWith("page error"));
+    check(crashes.length === 0, `no crashes in the Color-safe theme${crashes.length ? `: ${crashes.join(" / ")}` : ""}`);
+    await ctx.close();
+  }
+
+  // ---------------------------------------------------------------------------
   console.log("\nMobile checks");
   {
     const { ctx, page } = await openApp();
