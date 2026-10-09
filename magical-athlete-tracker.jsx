@@ -1707,12 +1707,14 @@ export default function App() {
       raceId,
       status,
       trackLength,
+      trackName,
       racers: validRacers.map((r) => ({
         id: r.id,
         name: r.name,
         color: r.color,
         position: r.position,
         finished: r.finished,
+        tripped: !!r.tripped,
         player: r.player,
       })),
       odds,
@@ -1723,7 +1725,7 @@ export default function App() {
     };
     window.storage.set(`race:${sessionToken}`, JSON.stringify(snapshot), true).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [specEnabled, sessionToken, raceId, status, trackLength, racers, odds, finishOrder]);
+  }, [specEnabled, sessionToken, raceId, status, trackLength, trackName, racers, odds, finishOrder]);
 
   // Poll for bets spectators placed on their own devices and merge them in.
   useEffect(() => {
@@ -3509,6 +3511,11 @@ function SpectatorView({ onLeave, initialPin = "" }) {
 
       <Card>
         <SectionTitle icon={Flag}>Who's winning</SectionTitle>
+        {snapshot.trackName && (
+          <p className="font-mono text-xs mb-2" style={{ color: "var(--muted)" }}>
+            Track: {snapshot.trackName === "wild" ? "Wild Wilds" : "Mild Mile"}
+          </p>
+        )}
         <div className="space-y-1.5">
           {sortedRacers.map((r, i) => (
             <div key={r.id} className="flex items-center gap-2 text-sm">
@@ -3517,6 +3524,14 @@ function SpectatorView({ onLeave, initialPin = "" }) {
               </span>
               <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: r.color }} />
               <span className="flex-1 truncate">{r.name}</span>
+              {r.tripped && !r.finished && snapshot.status === "racing" && (
+                <span
+                  className="font-mono text-xs px-1.5 py-0.5 rounded"
+                  style={{ background: "var(--ink)", color: "var(--paper2)" }}
+                >
+                  Tripped
+                </span>
+              )}
               {r.finished && (
                 <span
                   className="font-mono text-xs px-1.5 py-0.5 rounded"

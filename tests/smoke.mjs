@@ -558,6 +558,50 @@ async function suite(target) {
     await ctx.close();
   }
 
+  // ---------------------------------------------------------------------------
+  console.log("\nSpectator sees the track and who is tripped");
+  {
+    const { ctx, page: host, errors } = await openApp();
+    await startHosting(host);
+    await tap(host, /^Wild Wilds/);
+    await tap(host, /^Add racer$/);
+    const players = host.locator('input[placeholder="Who is racing?"]');
+    const names = host.locator('input[placeholder^="Racer"]');
+    for (const [i, [p, r]] of [["Adam", "Hare"], ["Ann", "Banana"], ["Ari", "Egg"]].entries()) {
+      await players.nth(i).fill(p);
+      await names.nth(i).fill(r);
+      await host.keyboard.press("Escape");
+    }
+    await tap(host, /^Betting$/, 400);
+    await tap(host, /Post odds/, 400);
+    await tap(host, /Enable spectator betting/, 800);
+    const pin = await host.evaluate(() => {
+      const b = [...document.querySelectorAll("button[aria-label^='Join code']")][0];
+      return b ? b.innerText.replace(/\D/g, "").slice(0, 4) : null;
+    });
+    const spec = await openPage(ctx, `${PAGE_URL}${PAGE_URL.includes("?") ? "&" : "?"}join=${pin === "1234" ? "4321" : "1234"}`, errors);
+    await tap(spec, /^Skip$/).catch(() => {});
+    await spec.locator('input[placeholder="Your name"]').fill("Gran");
+    await spec.locator('input[placeholder="4-digit code"]').fill(pin);
+    await tap(spec, /^Join$/, 1500);
+    await tap(spec, /^Got it$/).catch(() => {});
+    check(/Track: Wild Wilds/.test(await bodyText(spec)), "spectator sees which track is being raced");
+
+    await tap(host, /^Racers$/, 400);
+    await tap(host, /^Lock roster/, 800);
+    await tap(host, /^Got it$/).catch(() => {});
+    await tap(host, /^\+5$/); // Hare lands on a trip space
+    await tap(host, /mark as tripped/);
+    await spec.waitForTimeout(4800);
+    check(/Tripped/.test(await bodyText(spec)), "spectator sees the racer who tripped");
+
+    await tap(host, /^(✓ )?Next turn →/);
+    await tap(host, /^(✓ )?Next turn →/).catch(() => {});
+    await spec.screenshot({ path: join(SHOTS, "spectator-tripped.png") });
+    check(errors.length === 0, `no errors${errors.length ? `: ${errors.join(" / ")}` : ""}`);
+    await ctx.close();
+  }
+
   if (target === "web") {
     console.log("\nSpectator betting with no internet (real Firestore code)");
     const { ctx, page, errors } = await openApp({ sharedBackend: "firebase" });

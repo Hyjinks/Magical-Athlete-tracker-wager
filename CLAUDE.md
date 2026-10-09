@@ -157,7 +157,6 @@ archive/                      old versions, reference only (not built or linted)
 
 ## Known issues (October 2026 review)
 
-- The spectator snapshot doesn't include the track or who is tripped.
 - Spectators on other phones: Firestore is wired up (web app only) but has not
   yet had a real multi-phone test. Still to do: QR-code joining and a larger,
   simpler spectator screen for older users.
