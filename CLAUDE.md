@@ -157,7 +157,8 @@ archive/                      old versions, reference only (not built or linted)
 
 ## Known issues (October 2026 review)
 
-- Spectators on other phones: Firestore is wired up (web app only) but has not
-  yet had a real multi-phone test. Still to do: QR-code joining and a larger,
-  simpler spectator screen for older users.
+- Spectators on other phones: Firestore is wired up (web app only). A host-phone plus
+  desktop-browser spectator test passed on 10 Oct 2026; a spectator on a real phone,
+  several spectators at once, and a 3-4 phone practice run are still to do. Still to
+  do: QR-code joining.
 - `App()` is ~1,600 lines; the file is ~7,300.

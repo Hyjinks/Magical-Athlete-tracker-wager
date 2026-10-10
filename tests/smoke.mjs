@@ -587,6 +587,14 @@ async function suite(target) {
     await tap(spec, /^Got it$/).catch(() => {});
     check(/Track: Wild Wilds/.test(await bodyText(spec)), "spectator sees which track is being raced");
 
+    // Gran bets 10 on Hare to place, before the race
+    await tap(spec, /^Place \(top 2\)/, 150);
+    await tap(spec, /^Hare/, 150);
+    await tap(spec, /^10$/, 150);
+    await tap(spec, /^Place bet$/, 600);
+    check(/Bet placed: 10 on Hare/.test(await bodyText(spec)), "spectator gets a plain confirmation when a bet goes through");
+    await host.waitForTimeout(4800);
+
     await tap(host, /^Racers$/, 400);
     await tap(host, /^Lock roster/, 800);
     await tap(host, /^Got it$/).catch(() => {});
@@ -595,9 +603,24 @@ async function suite(target) {
     await spec.waitForTimeout(4800);
     check(/Tripped/.test(await bodyText(spec)), "spectator sees the racer who tripped");
 
-    await tap(host, /^(✓ )?Next turn →/);
-    await tap(host, /^(✓ )?Next turn →/).catch(() => {});
     await spec.screenshot({ path: join(SHOTS, "spectator-tripped.png") });
+
+    // Finish the race, save it, and the spectator sees their running total
+    for (const name of ["Hare", "Banana"]) {
+      const row = new RegExp(`^\\d+ (🎲 )?${name}`);
+      await tap(host, row, 300);
+      if ((await host.locator('input[placeholder="0–30"]').count()) === 0) await tap(host, row, 300);
+      await host.locator('input[placeholder="0–30"]').first().fill("30");
+      await tap(host, /^Go$/, 500);
+    }
+    await tap(host, /^Betting$/, 400);
+    await tap(host, /^Got it$/).catch(() => {});
+    await tap(host, /^Save result$/, 800);
+    await spec.waitForTimeout(4800);
+    const after = await bodyText(spec);
+    check(/The race is finished\. You won/.test(after), "spectator is told plainly how their bet went");
+    check(/Leaderboard/.test(after) && /Gran \(you\)/.test(after), "spectator sees the leaderboard with themselves marked");
+    await spec.screenshot({ path: join(SHOTS, "spectator-finished.png") });
     check(errors.length === 0, `no errors${errors.length ? `: ${errors.join(" / ")}` : ""}`);
     await ctx.close();
   }

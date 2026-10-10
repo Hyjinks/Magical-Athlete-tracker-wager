@@ -1719,13 +1719,14 @@ export default function App() {
       })),
       odds,
       finishOrder,
+      bankrolls,
       winnerName: winner ? winner.name : null,
       runnerUpName: runnerUp ? runnerUp.name : null,
       updatedAt: Date.now(),
     };
     window.storage.set(`race:${sessionToken}`, JSON.stringify(snapshot), true).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [specEnabled, sessionToken, raceId, status, trackLength, trackName, racers, odds, finishOrder]);
+  }, [specEnabled, sessionToken, raceId, status, trackLength, trackName, racers, odds, finishOrder, bankrolls]);
 
   // Poll for bets spectators placed on their own devices and merge them in.
   useEffect(() => {
@@ -3322,6 +3323,23 @@ function SpectatorView({ onLeave, initialPin = "" }) {
   const [betAmount, setBetAmount] = useState("");
   const [betType, setBetType] = useState("win"); // "win" | "place"
   const [betError, setBetError] = useState("");
+  const [betNote, setBetNote] = useState("");
+  const [offline, setOffline] = useState(false);
+  const lastOkRef = useRef(Date.now());
+
+  // Remember the name from last time, so it doesn't have to be typed again.
+  useEffect(() => {
+    let cancelled = false;
+    window.storage
+      .get("spectator-name", false)
+      .then((res) => {
+        if (!cancelled && res && res.value) setNameInput((cur) => cur || String(res.value).slice(0, 40));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const join = async () => {
     setJoinError("");
@@ -3349,6 +3367,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
       setToken(s.token);
       setJoinedPin(pin);
       setSpectatorName(name);
+      window.storage.set("spectator-name", name, false).catch(() => {});
       setJoined(true);
     } catch (e) {
       setJoinError("Couldn't reach the game. Check your internet connection and try again.");
@@ -3367,12 +3386,16 @@ function SpectatorView({ onLeave, initialPin = "" }) {
             setMyBets([]);
             setBetRacer("");
             setBetAmount("");
+            setBetNote("");
           }
           lastRaceIdRef.current = snap.raceId;
           setSnapshot(snap);
         }
+        lastOkRef.current = Date.now();
+        if (!cancelled) setOffline(false);
       } catch (e) {
-        // try again next tick
+        // try again next tick; after a while, tell the person we're reconnecting
+        if (!cancelled && Date.now() - lastOkRef.current > 12000) setOffline(true);
       }
       try {
         const s = await window.storage.get(`join:${joinedPin}`, true);
@@ -3399,8 +3422,11 @@ function SpectatorView({ onLeave, initialPin = "" }) {
     setMyBets((prev) => [...prev, bet]);
     setBetAmount("");
     setBetError("");
+    setBetNote("");
     try {
       await window.storage.set(`bet:${token}:${snapshot.raceId}:${bet.id}`, JSON.stringify(bet), true);
+      const racerName = (snapshot.racers || []).find((r) => r.id === betRacer)?.name || "your racer";
+      setBetNote(`Bet placed: ${amt} on ${racerName} to ${betType === "win" ? "win" : "place (finish 1st or 2nd)"}.`);
     } catch (e) {
       // It didn't reach the host — take it back off this phone's list too, so
       // nobody thinks a bet is down that the host never saw.
@@ -3414,7 +3440,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
     return (
       <Card>
         <SectionTitle icon={Coins}>Join as a spectator</SectionTitle>
-        <p className="text-xs mb-3" style={{ color: "var(--muted)" }}>
+        <p className="text-base mb-3" style={{ color: "var(--muted)" }}>
           Get the 4-digit code from whoever's hosting.
         </p>
         <input
@@ -3434,18 +3460,18 @@ function SpectatorView({ onLeave, initialPin = "" }) {
           style={{ borderColor: "var(--ink)", background: "var(--paper)" }}
         />
         {joinError && (
-          <p className="text-xs mb-2" style={{ color: "var(--red)" }}>
+          <p className="text-base mb-2" style={{ color: "var(--red)" }}>
             {joinError}
           </p>
         )}
         <button
           onClick={join}
-          className="w-full py-3 rounded-lg text-sm font-bold mb-2"
+          className="w-full py-3 rounded-lg text-lg font-bold mb-2"
           style={{ background: "var(--red)", color: "var(--paper2)", border: "2.5px solid var(--ink)" }}
         >
           Join
         </button>
-        <button onClick={onLeave} className="w-full py-2 text-xs" style={{ color: "var(--muted)" }}>
+        <button onClick={onLeave} className="w-full py-2 text-base" style={{ color: "var(--muted)" }}>
           ← Back
         </button>
       </Card>
@@ -3455,7 +3481,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
   if (!snapshot) {
     return (
       <Card>
-        <p className="text-sm text-center py-6" style={{ color: "var(--muted)" }}>
+        <p className="text-lg text-center py-6" style={{ color: "var(--muted)" }}>
           Connecting to the race…
         </p>
       </Card>
@@ -3464,6 +3490,10 @@ function SpectatorView({ onLeave, initialPin = "" }) {
 
   const snapRacers = Array.isArray(snapshot.racers) ? snapshot.racers : [];
   const snapOdds = snapshot.odds || {};
+  const snapBank = snapshot.bankrolls && typeof snapshot.bankrolls === "object" ? snapshot.bankrolls : {};
+  const snapBankList = Object.entries(snapBank)
+    .filter(([, t]) => typeof t === "number")
+    .sort((a, b) => b[1] - a[1]);
   const sortedRacers = [...snapRacers].sort((a, b) => b.position - a.position);
   const bettingOpen = snapshot.status === "setup" && sessionActive;
   const winnerId = snapshot.finishOrder && snapshot.finishOrder[0];
@@ -3491,42 +3521,51 @@ function SpectatorView({ onLeave, initialPin = "" }) {
 
       <Card>
         <div className="flex items-center justify-between">
-          <p className="font-display font-bold text-lg" style={{ color: "var(--ink)" }}>
+          <p className="font-display font-bold text-2xl" style={{ color: "var(--ink)" }}>
             Hey, {spectatorName}
           </p>
-          <button onClick={onLeave} className="text-xs" style={{ color: "var(--muted)" }}>
+          <button onClick={onLeave} className="text-base" style={{ color: "var(--muted)" }}>
             Leave
           </button>
         </div>
-        <p className="font-mono text-xs" style={{ color: "var(--muted)" }}>
+        <p className="text-xl font-bold mt-1" style={{ color: "var(--ink)" }}>
           {!sessionActive
-            ? "Host closed betting"
+            ? "Host closed betting."
             : snapshot.status === "setup"
-            ? "Betting open"
+            ? "Betting open — pick a racer and an amount below."
             : snapshot.status === "racing"
-            ? "Race in progress"
-            : "Race finished"}
+            ? "The race is on! Positions update by themselves."
+            : myBets.length === 0
+            ? "The race is finished."
+            : myPayout - myStaked >= 0
+            ? `The race is finished. You won ${(myPayout - myStaked).toFixed(2)}!`
+            : `The race is finished. You lost ${(myStaked - myPayout).toFixed(2)}.`}
         </p>
+        {offline && (
+          <p role="status" className="text-lg font-semibold mt-2" style={{ color: "var(--red)" }}>
+            Reconnecting… what you see may be a little out of date.
+          </p>
+        )}
       </Card>
 
       <Card>
         <SectionTitle icon={Flag}>Who's winning</SectionTitle>
         {snapshot.trackName && (
-          <p className="font-mono text-xs mb-2" style={{ color: "var(--muted)" }}>
+          <p className="font-mono text-base mb-2" style={{ color: "var(--muted)" }}>
             Track: {snapshot.trackName === "wild" ? "Wild Wilds" : "Mild Mile"}
           </p>
         )}
         <div className="space-y-1.5">
           {sortedRacers.map((r, i) => (
-            <div key={r.id} className="flex items-center gap-2 text-sm">
-              <span className="font-mono text-xs w-4 text-center" style={{ color: "var(--red)" }}>
+            <div key={r.id} className="flex items-center gap-2 text-lg">
+              <span className="font-mono text-base w-4 text-center" style={{ color: "var(--red)" }}>
                 {i + 1}
               </span>
               <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: r.color }} />
               <span className="flex-1 truncate">{r.name}</span>
               {r.tripped && !r.finished && snapshot.status === "racing" && (
                 <span
-                  className="font-mono text-xs px-1.5 py-0.5 rounded"
+                  className="font-mono text-base px-1.5 py-0.5 rounded"
                   style={{ background: "var(--ink)", color: "var(--paper2)" }}
                 >
                   Tripped
@@ -3534,13 +3573,13 @@ function SpectatorView({ onLeave, initialPin = "" }) {
               )}
               {r.finished && (
                 <span
-                  className="font-mono text-xs px-1.5 py-0.5 rounded"
+                  className="font-mono text-base px-1.5 py-0.5 rounded"
                   style={{ background: "var(--yellow)", color: "var(--ink)" }}
                 >
                   {winnerId === r.id ? "1st" : "2nd"}
                 </span>
               )}
-              <span className="font-mono text-xs" style={{ color: "var(--muted)" }}>
+              <span className="font-mono text-base" style={{ color: "var(--muted)" }}>
                 {r.position}/{snapshot.trackLength}
               </span>
             </div>
@@ -3548,17 +3587,50 @@ function SpectatorView({ onLeave, initialPin = "" }) {
         </div>
       </Card>
 
+      {Object.keys(snapBank).length > 0 && (
+        <Card>
+          <SectionTitle icon={Trophy}>Leaderboard</SectionTitle>
+          <p className="text-base mb-2" style={{ color: "var(--muted)" }}>
+            Everyone's winnings so far, after each saved race.
+          </p>
+          <div className="space-y-1.5">
+            {snapBankList.map(([name, total], i) => {
+              const me = name === spectatorName;
+              return (
+                <div
+                  key={name}
+                  className="flex items-center justify-between text-lg px-2 py-1.5 rounded"
+                  style={{ background: me ? "var(--yellow)" : "var(--paper)", color: "var(--ink)" }}
+                >
+                  <span className="truncate">
+                    {i + 1}. {name}
+                    {me ? " (you)" : ""}
+                  </span>
+                  <span
+                    className="font-mono font-semibold shrink-0"
+                    style={{ color: total >= 0 ? "var(--green)" : "var(--red)" }}
+                  >
+                    {total >= 0 ? "+" : ""}
+                    {total.toFixed(2)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
       <Card>
         <SectionTitle icon={Coins}>Odds</SectionTitle>
         <div className="flex items-center justify-between px-2 mb-1">
-          <span className="font-mono text-xs" style={{ color: "var(--muted)" }}>
+          <span className="font-mono text-base" style={{ color: "var(--muted)" }}>
             Racer
           </span>
           <div className="flex gap-3">
-            <span className="font-mono text-xs w-14 text-right" style={{ color: "var(--muted)" }}>
+            <span className="font-mono text-base w-20 text-right" style={{ color: "var(--muted)" }}>
               Win
             </span>
-            <span className="font-mono text-xs w-14 text-right" style={{ color: "var(--muted)" }}>
+            <span className="font-mono text-base w-20 text-right" style={{ color: "var(--muted)" }}>
               Place
             </span>
           </div>
@@ -3567,7 +3639,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
           {snapRacers.map((r) => (
             <div
               key={r.id}
-              className="flex items-center justify-between text-sm px-2 py-1.5 rounded"
+              className="flex items-center justify-between text-lg px-2 py-1.5 rounded"
               style={{ background: "var(--paper)" }}
             >
               <span className="flex items-center gap-2 min-w-0">
@@ -3575,10 +3647,10 @@ function SpectatorView({ onLeave, initialPin = "" }) {
                 <span className="truncate">{r.name}</span>
               </span>
               <div className="flex gap-3 shrink-0">
-                <span className="font-mono text-sm font-semibold w-14 text-right" style={{ color: "var(--red)" }}>
+                <span className="font-mono text-lg font-semibold w-20 text-right" style={{ color: "var(--red)" }}>
                   {snapOdds[r.id] ? `×${snapOdds[r.id].toFixed(2)}` : "—"}
                 </span>
-                <span className="font-mono text-sm w-14 text-right" style={{ color: "var(--muted)" }}>
+                <span className="font-mono text-lg w-20 text-right" style={{ color: "var(--muted)" }}>
                   {snapOdds[r.id] ? `×${placeOddsFor(snapOdds[r.id]).toFixed(2)}` : "—"}
                 </span>
               </div>
@@ -3594,7 +3666,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
             Win only pays if your racer finishes 1st. Place pays if they finish 1st or 2nd, at a
             lower rate.
           </OnboardingBanner>
-          <p className="text-xs font-mono uppercase mb-1.5" style={{ color: "var(--muted)" }}>
+          <p className="text-base font-mono uppercase mb-1.5" style={{ color: "var(--muted)" }}>
             Win or place?
           </p>
           <div className="flex gap-1.5 mb-3">
@@ -3605,7 +3677,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
               <button
                 key={id}
                 onClick={() => setBetType(id)}
-                className="flex-1 px-3 py-2 rounded-full text-sm font-medium border-2"
+                className="flex-1 px-3 py-2 rounded-full text-lg font-medium border-2"
                 style={{
                   background: betType === id ? "var(--purple)" : "var(--paper)",
                   color: betType === id ? "var(--paper2)" : "var(--ink)",
@@ -3625,7 +3697,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
                   key={r.id}
                   onClick={() => hasOdds && setBetRacer(r.id)}
                   disabled={!hasOdds}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-full text-sm font-medium border-2 disabled:opacity-40"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-full text-lg font-medium border-2 disabled:opacity-40"
                   style={{
                     background: betRacer === r.id ? "var(--green)" : "var(--paper)",
                     color: betRacer === r.id ? "var(--paper2)" : "var(--ink)",
@@ -3634,7 +3706,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
                 >
                   <span className="w-2 h-2 rounded-full inline-block" style={{ background: r.color }} />
                   {r.name}
-                  <span className="font-mono text-xs opacity-80">
+                  <span className="font-mono text-base opacity-80">
                     {shownOdds ? `×${shownOdds.toFixed(2)}` : "posting…"}
                   </span>
                 </button>
@@ -3646,7 +3718,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
               <button
                 key={n}
                 onClick={() => setBetAmount(String(n))}
-                className="px-3 py-2 rounded-lg text-sm font-mono font-semibold border-2"
+                className="px-3 py-2 rounded-lg text-lg font-mono font-semibold border-2"
                 style={{
                   background: betAmount === String(n) ? "var(--yellow)" : "var(--paper)",
                   borderColor: betAmount === String(n) ? "var(--yellow)" : "var(--ink)",
@@ -3670,14 +3742,19 @@ function SpectatorView({ onLeave, initialPin = "" }) {
           <button
             onClick={placeBet}
             disabled={!betRacer || !betAmount}
-            className="w-full py-3 rounded-lg text-sm font-bold disabled:opacity-40"
+            className="w-full py-3 rounded-lg text-lg font-bold disabled:opacity-40"
             style={{ background: "var(--red)", color: "var(--paper2)", border: "2.5px solid var(--ink)" }}
           >
             Place bet
           </button>
           {betError && (
-            <p role="alert" className="text-sm mt-2" style={{ color: "var(--red)" }}>
+            <p role="alert" className="text-lg mt-2" style={{ color: "var(--red)" }}>
               {betError}
+            </p>
+          )}
+          {betNote && (
+            <p role="status" className="text-lg font-semibold mt-2" style={{ color: "var(--green)" }}>
+              {betNote}
             </p>
           )}
         </Card>
@@ -3693,7 +3770,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
               const racerWinOdds = snapOdds[b.racerId] || 0;
               const applicableOdds = isWin ? racerWinOdds : placeOddsFor(racerWinOdds);
               return (
-                <div key={b.id} className="flex items-center justify-between text-xs px-2 py-1">
+                <div key={b.id} className="flex items-center justify-between text-base px-2 py-1">
                   <span className="flex items-center gap-1.5">
                     {racer?.name}
                     <span
@@ -3701,7 +3778,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
                       style={{
                         background: isWin ? "var(--highlight)" : "var(--paper2)",
                         border: "1px solid var(--ink)",
-                        fontSize: "10px",
+                        fontSize: "14px",
                       }}
                     >
                       {isWin ? "WIN" : "PLACE"}
@@ -3717,7 +3794,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
           {snapshot.status === "finished" && (
             <div className="mt-2 pt-2" style={{ borderTop: "1.5px solid var(--ink)" }}>
               <p
-                className="font-mono text-sm font-semibold"
+                className="font-mono text-lg font-semibold"
                 style={{ color: myPayout - myStaked >= 0 ? "var(--green)" : "var(--red)" }}
               >
                 {myPayout - myStaked >= 0 ? "+" : ""}
