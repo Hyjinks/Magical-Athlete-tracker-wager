@@ -159,6 +159,7 @@ archive/                      old versions, reference only (not built or linted)
 
 - Spectators on other phones: Firestore is wired up (web app only). A host-phone plus
   desktop-browser spectator test passed on 10 Oct 2026; a spectator on a real phone,
-  several spectators at once, and a 3-4 phone practice run are still to do. Still to
-  do: QR-code joining.
+  several spectators at once, and a 3-4 phone practice run are still to do. The host's
+  join screen shows a QR code (library `qrcode-generator`; only when the page has a
+  shareable http(s) address). Not yet scanned with a real phone camera.
 - `App()` is ~1,600 lines; the file is ~7,300.

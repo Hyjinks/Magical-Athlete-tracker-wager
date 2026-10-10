@@ -525,6 +525,16 @@ async function suite(target) {
       return b ? b.innerText.replace(/\D/g, "").slice(0, 4) : null;
     });
     check(/^\d{4}$/.test(pin || ""), `host gets a 4-digit join code (${pin})`);
+    const qrOk = await host.evaluate(() => {
+      const el = document.querySelector('[role="img"][aria-label^="QR code"]');
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      return !!el.querySelector("svg") && r.width >= 180 && r.right <= window.innerWidth;
+    });
+    await host.screenshot({ path: join(SHOTS, "host-join-qr.png") });
+    // The artifact test page is a file:// address, which can't be shared, so no QR there.
+    if (target === "web") check(qrOk, "host sees a QR code for joining, sized to scan and inside the screen");
+    else check(!qrOk, "no QR code when the page has no shareable address");
     const joinRecord = await host.evaluate((p) => localStorage.getItem(`ma-s:join:${p}`), pin);
     check(!!joinRecord && JSON.parse(joinRecord).active === true, "the code is claimed in shared storage for this game only");
 

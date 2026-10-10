@@ -15,6 +15,7 @@ import {
   Sparkles,
   Dices,
 } from "lucide-react";
+import qrcode from "qrcode-generator";
 
 const PALETTE = [
   "#C1301B", // poster red
@@ -425,6 +426,29 @@ function useCopy() {
   return [state, copy];
 }
 
+// A QR code for the join link, drawn as an SVG on a white square with a quiet
+// zone so phone cameras read it in any theme. Returns nothing if it can't be made.
+function JoinQr({ link }) {
+  let svg = "";
+  try {
+    const qr = qrcode(0, "M");
+    qr.addData(link);
+    qr.make();
+    svg = qr.createSvgTag({ cellSize: 4, margin: 4, scalable: true });
+  } catch (e) {
+    return null;
+  }
+  return (
+    <div
+      role="img"
+      aria-label={`QR code for joining: ${link}`}
+      className="mx-auto rounded-lg overflow-hidden"
+      style={{ width: 208, height: 208, background: "#fff", border: "2.5px solid var(--ink)" }}
+      dangerouslySetInnerHTML={{ __html: svg }}
+    />
+  );
+}
+
 // The host's share block: the big code is itself tap-to-copy, with explicit
 // "Copy code" and "Copy join link" buttons under it. The link button only
 // appears when the page has a shareable http(s) address.
@@ -451,6 +475,14 @@ function JoinShare({ pin }) {
           {pinState === "copied" ? "✓ Code copied" : pinState === "failed" ? "Couldn't copy — read it out instead" : "tap to copy"}
         </span>
       </button>
+      {hasLink && (
+        <div className="mb-3">
+          <JoinQr link={link} />
+          <p className="text-sm text-center mt-1" style={{ color: "var(--muted)" }}>
+            Scan with a phone camera to join
+          </p>
+        </div>
+      )}
       <div className={`grid gap-2 ${hasLink ? "grid-cols-2" : "grid-cols-1"}`}>
         <CopyButton text={pin} label="Copy code" icon="🔢" />
         {hasLink && <CopyButton text={link} label="Copy join link" icon="🔗" />}
