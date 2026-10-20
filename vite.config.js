@@ -4,10 +4,32 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+import { execFileSync } from "node:child_process";
+
+// Which commit this build came from, shown as <meta name="ma-build"> in
+// index.html (view the page source to check what's live). Same rule as the
+// artifact build: "-dirty" means uncommitted changes to the app were included.
+function buildId() {
+  try {
+    const sha = execFileSync("git", ["rev-parse", "--short", "HEAD"]).toString().trim();
+    const dirty = execFileSync("git", ["status", "--porcelain", "--", "magical-athlete-tracker.jsx"])
+      .toString()
+      .trim();
+    return dirty ? `${sha}-dirty` : sha;
+  } catch {
+    return "unknown"; // not a git checkout
+  }
+}
+
+const buildTag = {
+  name: "ma-build-tag",
+  transformIndexHtml: () => [{ tag: "meta", attrs: { name: "ma-build", content: buildId() }, injectTo: "head" }],
+};
 
 export default defineConfig({
   plugins: [
     react(),
+    buildTag,
     VitePWA({
       // A new version installs itself the next time the app is opened, so
       // nobody at game night is stuck on an old copy.

@@ -18,6 +18,8 @@ Mobile-first: it's used on phones at the table.
     Action `.github/workflows/firebase-hosting-merge.yml`, about a minute); pull
     requests get a preview link. Check runs with
     `gh run list -R Hyjinks/Magical-Athlete-tracker-wager`.
+- Both builds put `<meta name="ma-build" content="<commit>">` in the page (view
+  source to see which commit is live; `-dirty` = built with uncommitted app changes).
 - Old versions, kept for reference only — never build from them or copy code back:
   `archive/vite-pwa-july-2026/` (the July installable-PWA version; see
   `archive/README.md`). Older versions of the app itself are in git history.
