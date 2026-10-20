@@ -1706,10 +1706,6 @@ export default function App() {
   const runnerUp = validRacers.find((r) => r.id === runnerUpId);
 
   const totalPool = bets.reduce((s, b) => s + b.amount, 0);
-  const poolByRacer = {};
-  bets.forEach((b) => {
-    poolByRacer[b.racerId] = (poolByRacer[b.racerId] || 0) + b.amount;
-  });
 
   const winnerOdds = winnerId ? odds[winnerId] || 0 : 0;
 
@@ -2323,7 +2319,6 @@ export default function App() {
                 placeBet={placeBet}
                 bets={bets}
                 removeBet={removeBet}
-                poolByRacer={poolByRacer}
                 totalPool={totalPool}
                 winner={winner}
                 runnerUp={runnerUp}
@@ -5733,7 +5728,6 @@ function BettingTab(props) {
     placeBet,
     bets,
     removeBet,
-    poolByRacer,
     totalPool,
     winner,
     runnerUp,
@@ -6143,7 +6137,6 @@ function BettingTab(props) {
             </div>
             <div className="space-y-1.5">
               {racers.map((r) => {
-                const pool = poolByRacer[r.id] || 0;
                 const racerOdds = odds[r.id];
                 return (
                   <div
@@ -6778,6 +6771,9 @@ function TrackTab({
   const flashTimer = useRef(null);
   const [rankFlash, setRankFlash] = useState({});
 
+  // Runs after every render on purpose: it re-measures row positions each
+  // time. setRankFlash only fires when the order changed, so it can't loop.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useLayoutEffect(() => {
     const tops = {};
     Object.entries(rowRefs.current).forEach(([id, el]) => {
