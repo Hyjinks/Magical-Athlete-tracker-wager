@@ -139,6 +139,8 @@ async function tap(page, re, wait = 250) {
   const texts = await all.evaluateAll((els) => els.map((el) => (el.innerText || "").replace(/\s+/g, " ").trim()));
   const i = texts.findIndex((t) => re.test(t));
   if (i < 0) throw new Error(`No button matching ${re}. Buttons: ${texts.filter(Boolean).slice(0, 40).join(" | ")}`);
+  // Scrolled to the middle first, so the fixed tab bar can't be on top of it.
+  await all.nth(i).evaluate((el) => el.scrollIntoView({ block: "center" }));
   await all.nth(i).click({ force: true });
   await page.waitForTimeout(wait);
 }
@@ -663,6 +665,55 @@ async function suite(target) {
     check(/The race is finished\. You won/.test(after), "spectator is told plainly how their bet went");
     check(/Leaderboard/.test(after) && /Gran \(you\)/.test(after), "spectator sees the leaderboard with themselves marked");
     await spec.screenshot({ path: join(SHOTS, "spectator-finished.png") });
+    check(errors.length === 0, `no errors${errors.length ? `: ${errors.join(" / ")}` : ""}`);
+    await ctx.close();
+  }
+
+  // ---------------------------------------------------------------------------
+  console.log("\nBack up and restore saved games");
+  {
+    const { ctx, page, errors } = await openApp();
+    await setUpRace(page, "mild");
+    for (const name of ["Banana", "Hare"]) {
+      const row = new RegExp(`^\\d+ (🎲 )?${name}`);
+      await tap(page, row, 300);
+      if ((await page.locator('input[placeholder="0–30"]').count()) === 0) await tap(page, row, 300);
+      await page.locator('input[placeholder="0–30"]').first().fill("30");
+      await tap(page, /^Go$/, 500);
+    }
+    await tap(page, /^Betting$/, 400);
+    await tap(page, /^Got it$/).catch(() => {});
+    await tap(page, /^Save result$/, 800);
+    await tap(page, /^History$/, 800);
+    const [download] = await Promise.all([page.waitForEvent("download"), tap(page, /^Back up$/, 600)]);
+    const file = join(SHOTS, "backup.json");
+    await download.saveAs(file);
+    const backup = JSON.parse(readFileSync(file, "utf8"));
+    check(backup.format === "magical-athlete-backup" && backup.races.length === 1 && backup.races[0].winner === "Banana", "Back up saves a file with the saved race in it");
+    check(/Backup of 1 saved race made/.test(await bodyText(page)), "and says so");
+
+    // The phone forgets its history; the backup brings it back
+    await page.evaluate(() => {
+      for (const k of Object.keys(localStorage)) if (k.startsWith("ma:race:") || k === "ma:history-index") localStorage.removeItem(k);
+    });
+    await page.reload();
+    await page.waitForTimeout(800);
+    await tap(page, /Continue your game|Let's race/, 1200);
+    await tap(page, /Let's race/, 1200).catch(() => {});
+    await tap(page, /^History$/, 800);
+    check(/No saved races yet/.test(await bodyText(page)), "(history is gone)");
+    await page.locator('input[type="file"]').setInputFiles(file);
+    await page.waitForTimeout(1200);
+    let text = await bodyText(page);
+    check(/Added 1 race\./.test(text), "Restore says how many races it added");
+    check(/Banana/.test(text) && !/No saved races yet/.test(text), "the restored race is back in the history");
+    await page.locator('input[type="file"]').setInputFiles(file);
+    await page.waitForTimeout(1200);
+    check(/Added 0 races \(1 was already here\)/.test(await bodyText(page)), "restoring the same file twice adds nothing");
+    await page.locator('input[type="file"]').setInputFiles({ name: "notes.json", mimeType: "application/json", buffer: Buffer.from('{"hello":1}') });
+    await page.waitForTimeout(800);
+    check(/isn't a Magical Athlete backup/.test(await bodyText(page)), "a file that isn't a backup is refused, plainly");
+    await page.screenshot({ path: join(SHOTS, "history-backup.png"), fullPage: true });
     check(errors.length === 0, `no errors${errors.length ? `: ${errors.join(" / ")}` : ""}`);
     await ctx.close();
   }

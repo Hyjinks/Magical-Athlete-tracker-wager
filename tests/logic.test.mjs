@@ -27,7 +27,7 @@ writeFileSync(file, out.outputFiles[0].text);
 const app = await import(pathToFileURL(file).href);
 rmSync(dir, { recursive: true, force: true });
 
-const { betPayout, placeOddsFor, nameKey, spectatorBetProblem, betValue, MAX_BET } = app;
+const { betPayout, placeOddsFor, nameKey, spectatorBetProblem, betValue, MAX_BET, planRestore, BACKUP_FORMAT } = app;
 
 test("place odds sit between 1x and the win odds", () => {
   assert.equal(placeOddsFor(0), 0);
@@ -96,4 +96,37 @@ test("the host turns down late or nonsensical bets", () => {
   assert.equal(spectatorBetProblem({ ...ok, amount: MAX_BET }, {}, { odds }), null);
   assert.equal(spectatorBetProblem({ ...ok, betType: "each-way" }, {}, { odds }), "invalid");
   assert.equal(spectatorBetProblem({ ...ok, betType: undefined }, {}, { odds }), null); // older app: a win bet
+});
+
+test("restoring a backup merges races in, newest first, without losing any", () => {
+  const backup = (races, settings = {}) => ({ format: BACKUP_FORMAT, version: 1, races, settings });
+  const race = (id, date) => ({ id, date, winner: "Hare" });
+  const here = [
+    { id: "b", date: "2026-10-03T10:00:00Z" },
+    { id: "a", date: "2026-10-01T10:00:00Z" },
+  ];
+  const plan = planRestore(backup([race("c", "2026-10-02T10:00:00Z"), race("a", "2026-10-01T10:00:00Z")]), here);
+  assert.deepEqual(plan.index, ["b", "c", "a"]);
+  assert.deepEqual(plan.writes.map((r) => r.id), ["c"]);
+  assert.equal(plan.added, 1);
+  assert.equal(plan.alreadyHere, 1);
+  assert.deepEqual(plan.deletes, []);
+
+  // Restoring the same file again adds nothing
+  const again = planRestore(backup([race("c", "2026-10-02T10:00:00Z")]), [...here, { id: "c", date: "2026-10-02T10:00:00Z" }]);
+  assert.equal(again.added, 0);
+  assert.equal(again.alreadyHere, 1);
+
+  // Settings only fill gaps
+  const s = planRestore(backup([], { roster: "[1]", "house-rules": "{}" }), [], { roster: true });
+  assert.deepEqual(s.settings, { "house-rules": "{}" });
+
+  // Bad records are skipped; the newest 100 are kept
+  const many = Array.from({ length: 105 }, (_, i) => race(`r${i}`, `2026-01-01T00:00:${String(i % 60).padStart(2, "0")}Z`));
+  const capped = planRestore(backup([...many, { id: "bad id!", date: "x" }, null]), []);
+  assert.equal(capped.index.length, 100);
+
+  for (const notBackup of [null, {}, { format: "something-else", version: 1, races: [] }, { format: BACKUP_FORMAT, version: 2, races: [] }]) {
+    assert.throws(() => planRestore(notBackup, []), /not-a-backup/);
+  }
 });

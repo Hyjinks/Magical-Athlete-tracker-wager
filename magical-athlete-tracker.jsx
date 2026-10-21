@@ -14,6 +14,8 @@ import {
   Minus,
   Sparkles,
   Dices,
+  Download,
+  Upload,
 } from "lucide-react";
 import qrcode from "qrcode-generator";
 
@@ -3887,6 +3889,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
           value={nameInput}
           onChange={(e) => setNameInput(e.target.value)}
           placeholder="Your name"
+          maxLength={40}
           className="w-full mb-2 px-3 py-2 rounded-lg border"
           style={{ borderColor: "var(--ink)", background: "var(--paper)" }}
         />
@@ -6547,6 +6550,7 @@ function BettingTab(props) {
               onChange={(e) => setNewBettorName(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && addBettor()}
               placeholder="Spectator name"
+              maxLength={40}
               className="flex-1 px-2 py-1.5 rounded border"
               style={{ borderColor: "var(--ink)", background: "var(--paper)" }}
             />
@@ -7899,10 +7903,235 @@ function CareerStatsCard({ records }) {
   );
 }
 
+// --- Backup and restore (History tab) ---
+// Saved games live only in this browser's storage, which a phone can wipe.
+// A backup file holds every saved race plus the rosters and house rules; a
+// restore merges it back in without overwriting or deleting anything.
+export const BACKUP_FORMAT = "magical-athlete-backup";
+const BACKUP_SETTING_KEYS = ["roster", "bettor-roster", "house-rules", "theme-preference"];
+const HISTORY_CAP = 100;
+
+async function buildBackup() {
+  const read = async (k) => {
+    try {
+      const r = await window.storage.get(k, false);
+      return r ? r.value : null;
+    } catch (e) {
+      return null;
+    }
+  };
+  let ids = [];
+  try {
+    ids = JSON.parse((await read("history-index")) || "[]");
+  } catch (e) {
+    ids = [];
+  }
+  const races = [];
+  for (const id of Array.isArray(ids) ? ids : []) {
+    const v = await read(`race:${id}`);
+    if (!v) continue;
+    try {
+      races.push(JSON.parse(v));
+    } catch (e) {
+      // skip a damaged record
+    }
+  }
+  const settings = {};
+  for (const k of BACKUP_SETTING_KEYS) {
+    const v = await read(k);
+    if (v != null) settings[k] = v;
+  }
+  return { format: BACKUP_FORMAT, version: 1, exportedAt: new Date().toISOString(), races, settings };
+}
+
+// Works out a restore without touching storage. `existing` is the races
+// already here ({ id, date }, newest first); `existingSettings` which setting
+// keys this phone already has. Throws "not-a-backup" for anything else.
+export function planRestore(backup, existing, existingSettings = {}) {
+  if (!backup || backup.format !== BACKUP_FORMAT || backup.version !== 1 || !Array.isArray(backup.races)) {
+    throw new Error("not-a-backup");
+  }
+  const have = new Set(existing.map((r) => r.id));
+  const incoming = new Map();
+  for (const r of backup.races) {
+    if (!r || typeof r.id !== "string" || !/^[A-Za-z0-9]{1,40}$/.test(r.id) || typeof r.date !== "string") continue;
+    if (have.has(r.id) || incoming.has(r.id)) continue;
+    incoming.set(r.id, r);
+  }
+  const all = [...existing.map((r) => ({ id: r.id, date: r.date || "" })), ...[...incoming.values()].map((r) => ({ id: r.id, date: r.date }))];
+  all.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  const kept = all.slice(0, HISTORY_CAP).map((r) => r.id);
+  const keptSet = new Set(kept);
+  const writes = [...incoming.values()].filter((r) => keptSet.has(r.id));
+  const deletes = existing.map((r) => r.id).filter((id) => !keptSet.has(id));
+  const settings = {};
+  const src = backup.settings && typeof backup.settings === "object" ? backup.settings : {};
+  for (const k of BACKUP_SETTING_KEYS) {
+    if (typeof src[k] === "string" && !existingSettings[k]) settings[k] = src[k];
+  }
+  return { index: kept, writes, deletes, settings, added: writes.length, alreadyHere: backup.races.length - incoming.size };
+}
+
+// Hands the file to the phone's share sheet where there is one (Save to
+// Files, email…), otherwise downloads it.
+async function deliverBackupFile(json, filename) {
+  const blob = new Blob([json], { type: "application/json" });
+  try {
+    const file = new File([blob], filename, { type: "application/json" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: "Magical Athlete backup" });
+      return "shared";
+    }
+  } catch (e) {
+    if (e && e.name === "AbortError") return "cancelled";
+    // fall through to a download
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  return "downloaded";
+}
+
+// `msg` / `setMsg` live in HistoryTab: a restore reloads the history, which
+// briefly replaces this card with "Loading history…", and the message must
+// survive that.
+function BackupCard({ historyIndex, setHistoryIndex, records, msg, setMsg }) {
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef(null);
+
+  const backUp = async () => {
+    if (busy) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      const backup = await buildBackup();
+      const date = new Date().toISOString().slice(0, 10);
+      const how = await deliverBackupFile(JSON.stringify(backup), `magical-athlete-backup-${date}.json`);
+      if (how !== "cancelled") {
+        const n = backup.races.length;
+        setMsg({
+          ok: true,
+          text: `Backup of ${n} saved race${n === 1 ? "" : "s"} made. Keep the file somewhere safe, like Files or an email to yourself.`,
+        });
+      }
+    } catch (e) {
+      setMsg({ ok: false, text: "Couldn't make the backup. Try again." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const restore = async (file) => {
+    if (!file || busy) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      let backup;
+      try {
+        backup = JSON.parse(await file.text());
+      } catch (e) {
+        throw new Error("not-a-backup");
+      }
+      const existingSettings = {};
+      for (const k of BACKUP_SETTING_KEYS) {
+        try {
+          existingSettings[k] = !!(await window.storage.get(k, false));
+        } catch (e) {
+          existingSettings[k] = false;
+        }
+      }
+      const known = new Map(records.map((r) => [r.id, r.date]));
+      const plan = planRestore(
+        backup,
+        historyIndex.map((id) => ({ id, date: known.get(id) || "" })),
+        existingSettings
+      );
+      // Races first, the index last: if anything fails part-way, nothing
+      // visible has changed.
+      for (const r of plan.writes) await window.storage.set(`race:${r.id}`, JSON.stringify(r), false);
+      await window.storage.set("history-index", JSON.stringify(plan.index), false);
+      for (const [k, v] of Object.entries(plan.settings)) await window.storage.set(k, v, false);
+      plan.deletes.forEach((id) => window.storage.delete(`race:${id}`, false).catch(() => {}));
+      setHistoryIndex(plan.index);
+      const extra = Object.keys(plan.settings).length
+        ? " Restored rosters and house rules apply next time the app opens."
+        : "";
+      setMsg({
+        ok: true,
+        text: `Added ${plan.added} race${plan.added === 1 ? "" : "s"}${
+          plan.alreadyHere ? ` (${plan.alreadyHere} ${plan.alreadyHere === 1 ? "was" : "were"} already here)` : ""
+        }.${extra}`,
+      });
+    } catch (e) {
+      setMsg({
+        ok: false,
+        text:
+          e && e.message === "not-a-backup"
+            ? "That file isn't a Magical Athlete backup. Nothing was changed."
+            : "Couldn't restore. Nothing was changed. Try again.",
+      });
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  return (
+    <Card>
+      <SectionTitle icon={Save}>Backup</SectionTitle>
+      <p className="text-xs mb-2" style={{ color: "var(--muted)" }}>
+        Saved games are kept only on this phone. Back them up to a file now and then, and restore it on this or
+        another phone. Restoring adds races; it never deletes any.
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          onClick={backUp}
+          disabled={busy}
+          className="flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-bold disabled:opacity-50"
+          style={{ background: "var(--purple)", color: "var(--paper2)", border: "2.5px solid var(--ink)" }}
+        >
+          <Download size={15} /> Back up
+        </button>
+        <button
+          onClick={() => fileRef.current && fileRef.current.click()}
+          disabled={busy}
+          className="flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-bold disabled:opacity-50"
+          style={{ background: "var(--paper)", color: "var(--ink)", border: "2.5px solid var(--ink)" }}
+        >
+          <Upload size={15} /> Restore
+        </button>
+      </div>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="application/json,.json"
+        aria-label="Backup file to restore"
+        className="hidden"
+        onChange={(e) => restore(e.target.files && e.target.files[0])}
+      />
+      {msg && (
+        <p
+          role={msg.ok ? "status" : "alert"}
+          className="text-sm font-semibold mt-2"
+          style={{ color: msg.ok ? "var(--green)" : "var(--red)" }}
+        >
+          {msg.text}
+        </p>
+      )}
+    </Card>
+  );
+}
+
 function HistoryTab({ historyIndex, setHistoryIndex, activeSessionId }) {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [standingsScope, setStandingsScope] = useState(activeSessionId ? "session" : "all");
+  const [backupMsg, setBackupMsg] = useState(null); // { ok, text }, see BackupCard
 
   useEffect(() => {
     (async () => {
@@ -7943,13 +8172,26 @@ function HistoryTab({ historyIndex, setHistoryIndex, activeSessionId }) {
     );
   }
 
+  const backupCard = (
+    <BackupCard
+      historyIndex={historyIndex}
+      setHistoryIndex={setHistoryIndex}
+      records={records}
+      msg={backupMsg}
+      setMsg={setBackupMsg}
+    />
+  );
+
   if (records.length === 0) {
     return (
-      <Card>
-        <p className="text-sm text-center py-6" style={{ color: "var(--muted)" }}>
-          No saved races yet. Finish a race and save it to build a history here.
-        </p>
-      </Card>
+      <div>
+        <Card>
+          <p className="text-sm text-center py-6" style={{ color: "var(--muted)" }}>
+            No saved races yet. Finish a race and save it to build a history here.
+          </p>
+        </Card>
+        {backupCard}
+      </div>
     );
   }
 
@@ -8068,6 +8310,7 @@ function HistoryTab({ historyIndex, setHistoryIndex, activeSessionId }) {
           </ConfirmButton>
         </Card>
       ))}
+      {backupCard}
     </div>
   );
 }
