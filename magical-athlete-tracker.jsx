@@ -3735,16 +3735,23 @@ function SpectatorView({ onLeave, initialPin = "" }) {
   const markBet = (id, patch) => setMyBets((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)));
 
   // Saves a bet under its own id. Sending the same bet again overwrites it,
-  // never adds a second one, so a retry can't double a bet.
+  // never adds a second one, so a retry can't double a bet. Returns "placed",
+  // "rejected" or "retry".
   const sendBet = async (b) => {
-    if (sendingRef.current.has(b.id)) return false;
+    if (sendingRef.current.has(b.id)) return "retry";
     sendingRef.current.add(b.id);
     try {
       await window.storage.set(betKey(b), betValue(b), true);
       markBet(b.id, { state: "placed" });
-      return true;
+      return "placed";
     } catch (e) {
-      return false;
+      // The server said no (Firestore rules: betting had closed). That's
+      // final; anything else (no signal, slow) is retried.
+      if (e && e.code === "permission-denied") {
+        markBet(b.id, { state: "rejected", reason: "closed" });
+        return "rejected";
+      }
+      return "retry";
     } finally {
       sendingRef.current.delete(b.id);
     }
@@ -3842,6 +3849,10 @@ function SpectatorView({ onLeave, initialPin = "" }) {
   const placeBet = async () => {
     const amt = parseFloat(betAmount);
     if (!betRacer || !amt || amt <= 0 || !snapshot || !snapshot.odds[betRacer]) return;
+    if (amt > MAX_BET) {
+      setBetError(`Bets go up to ${MAX_BET.toLocaleString()}.`);
+      return;
+    }
     const bet = {
       id: uid(),
       raceId: snapshot.raceId,
@@ -3859,8 +3870,11 @@ function SpectatorView({ onLeave, initialPin = "" }) {
     setBetSending("");
     const racerName = (snapshot.racers || []).find((r) => r.id === betRacer)?.name || "your racer";
     const what = `${amt} on ${racerName} to ${betType === "win" ? "win" : "place (finish 1st or 2nd)"}`;
-    if (await sendBet(bet)) {
+    const outcome = await sendBet(bet);
+    if (outcome === "placed") {
       setBetNote(`Bet placed: ${what}.`);
+    } else if (outcome === "rejected") {
+      setBetError("That bet wasn't accepted: betting has closed.");
     } else {
       // Not confirmed, but it may still get there (a slow signal). It stays in
       // the list as "Sending…" and is retried with the same id.

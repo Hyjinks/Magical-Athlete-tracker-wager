@@ -78,8 +78,11 @@ npm run check
   On claude.ai the host provides it. In the web app (`src/main.jsx`) personal keys
   go to localStorage (`src/storage-local.js`, keys `ma:`) and shared keys go to
   Cloud Firestore (`src/storage-shared-firebase.js`, collection `shared`, one doc
-  per key: `{key, value, owner, updatedAt}`, anonymous sign-in, live listeners so
-  polling costs no reads; Firebase is only downloaded once a shared key is used).
+  per key: `{key, value, owner, updatedAt, expiresAt}` — `expiresAt` is a week
+  ahead, for a time-to-live clean-up policy — anonymous sign-in, live listeners so
+  polling costs no reads; Firebase is only downloaded once a shared key is used;
+  App Check switches on when `appCheckSiteKey` in `src/firebase-config.js` is set,
+  see `docs/DEPLOY.md` Part E).
   Shared keys: `join:<4-digit code>` (one per game, claimed when spectator betting
   starts), `race:<token>` (snapshot), `bet:<token>:<raceId>:<id>`. Tokens and ids
   must stay alphanumeric — **`firestore.rules` only accepts those three key
@@ -91,7 +94,10 @@ npm run check
   bet's race and says `"status":"setup"` — they match the start of the JSON, so
   **the snapshot object must keep `raceId` then `status` as its first two keys**
   — and a stored bet can only be rewritten unchanged (retries reuse the bet's id;
-  `betValue()` is the one place a bet's stored JSON is made).
+  `betValue()` is the one place a bet's stored JSON is made). **The rules also
+  match a bet's JSON against `betValue()`'s exact key order and formats**
+  (`validBet` in `firestore.rules`), so changing `betValue()` needs a rules
+  change and a rules test.
   **Test rule changes with `npm run test:rules`** (needs Java; it downloads the
   Firestore emulator once into `node_modules/.cache`; not part of `npm run check`).
   The smoke test sets `window.__MA_SHARED_BACKEND__ = "local"` and uses pages in
@@ -108,6 +114,10 @@ npm run check
   phone, first to bet keeps it; shared as `takenNames`) and turns bets down with
   `spectatorBetProblem()` — late (past `LATE_BET_GRACE_MS`), invalid, or someone
   else's name — by deleting them; the spectator's phone notices and says why.
+- **Backups.** Saved games (`history-index`, `race:<id>`), rosters and house
+  rules can be backed up to a file and restored from the History tab
+  (`buildBackup` / `planRestore`). A new personal key worth keeping across
+  phones belongs in `BACKUP_SETTING_KEYS`.
 - **Service worker (web app).** It caches the whole app so it opens on patchy Wi-Fi,
   and updates itself the next time the app is opened. `firebase.json` stops
   `index.html` and `sw.js` being cached by the browser so updates are seen. The smoke

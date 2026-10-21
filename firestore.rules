@@ -19,7 +19,10 @@ rules_version = '2';
 // A new bet is only accepted while that race's betting is open: the race
 // snapshot (whose JSON always starts {"raceId":…,"status":…) must be for the
 // bet's race and say "setup". A stored bet can be sent again unchanged (the
-// app retries slow saves with the same id) but never altered.
+// app retries slow saves with the same id) but never altered. And its text
+// must be exactly the shape the app writes (betValue() in the app): its own
+// id, a name of 1–40 characters, an optional phone id, a racer, a plain
+// positive amount, and win or place.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -46,8 +49,11 @@ service cloud.firestore {
 
       function validShape() {
         let d = request.resource.data;
-        return d.keys().hasOnly(['key', 'value', 'owner', 'updatedAt'])
+        // expiresAt (optional: older copies of the app don't send it) is
+        // when a time-to-live policy may delete the document.
+        return d.keys().hasOnly(['key', 'value', 'owner', 'updatedAt', 'expiresAt'])
           && d.keys().hasAll(['key', 'value', 'owner', 'updatedAt'])
+          && (!('expiresAt' in d) || d.expiresAt is timestamp)
           && d.key == docId
           && d.value is string
           && d.value.size() < 50000
@@ -57,6 +63,19 @@ service cloud.firestore {
 
       function ownsIt() {
         return resource.data.owner == request.auth.uid;
+      }
+
+      // A bet's stored JSON, exactly as the app writes it. (bettorId and
+      // betType are optional for bets from older copies of the app.)
+      function validBet(id) {
+        return request.resource.data.value.matches(
+          '[{]"id":"' + id.split(':')[3] + '"'
+          + ',"bettorName":"([^"\\\\]|\\\\.){1,40}"'
+          + '(,"bettorId":"[A-Za-z0-9]{1,40}")?'
+          + ',"racerId":"[A-Za-z0-9]{1,40}"'
+          + ',"amount":[0-9]{1,5}([.][0-9]{1,6})?'
+          + '(,"betType":"(win|place)")?[}]'
+        );
       }
 
       // The bet's race is the one in the snapshot, and its betting is open.
@@ -80,7 +99,7 @@ service cloud.firestore {
       allow create: if signedIn() && validShape()
         && (isJoin(docId)
             || isRace(docId)
-            || (isBet(docId) && exists(raceOf(docId)) && bettingOpenFor(docId)));
+            || (isBet(docId) && validBet(docId) && exists(raceOf(docId)) && bettingOpenFor(docId)));
 
       allow update: if signedIn() && validShape()
         && ((isJoin(docId) && (ownsIt() || joinIsFree()))

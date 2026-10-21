@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
-import { doc, setDoc, getDoc, deleteDoc, serverTimestamp, collection, getDocs } from "firebase/firestore";
+import { doc, setDoc, getDoc, deleteDoc, serverTimestamp, collection, getDocs, Timestamp } from "firebase/firestore";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const [host, port] = (process.env.FIRESTORE_EMULATOR_HOST || "127.0.0.1:8085").split(":");
@@ -116,4 +116,37 @@ test("listing is allowed for signed-in phones (the app lists a race's bets)", as
   await assertSucceeds(write("host", "race:abc", race("r1", "setup")));
   await assertSucceeds(getDocs(collection(db("gran"), "shared")));
   await assertFails(getDocs(collection(db(null), "shared")));
+});
+
+test("a bet's contents must be the shape the app writes", async () => {
+  await assertSucceeds(write("host", "race:abc", race("r1", "setup")));
+  const ok = (id, value) => assertSucceeds(write("gran", `bet:abc:r1:${id}`, value));
+  const no = (id, value) => assertFails(write("gran", `bet:abc:r1:${id}`, value));
+  // As the app writes them today, and as older copies of the app did
+  await ok("a1", bet("a1"));
+  await ok("a2", bet("a2", { betType: "place", amount: 12.5 }));
+  await ok("a3", bet("a3", { bettorName: 'Nan "the Hare" O’Brien \u{1F407}' }));
+  await ok("a4", JSON.stringify({ id: "a4", bettorName: "Gran", racerId: "hare", amount: 5, betType: "win" }));
+  await ok("a5", JSON.stringify({ id: "a5", bettorName: "Gran", racerId: "hare", amount: 5 }));
+  // Anything else
+  await no("b1", bet("someoneelse"));
+  await no("b2", bet("b2", { bettorName: "" }));
+  await no("b3", bet("b3", { bettorName: "x".repeat(41) }));
+  await no("b4", bet("b4", { amount: -10 }));
+  await no("b5", bet("b5", { amount: "10" }));
+  await no("b6", bet("b6", { amount: 1e21 }));
+  await no("b7", bet("b7", { amount: 123456 }));
+  await no("b8", bet("b8", { betType: "each-way" }));
+  await no("b9", bet("b9", { racerId: "../x" }));
+  await no("c1", bet("c1", { extra: true }));
+  await no("c2", JSON.stringify({ id: "c2", bettorName: "Gran", racerId: "hare", betType: "win" }));
+  await no("c3", "not json at all");
+});
+
+test("documents may carry an expiry date for the clean-up policy", async () => {
+  const at = (key, value, expiresAt) =>
+    setDoc(doc(db("host"), "shared", key), { key, value, owner: "host", updatedAt: serverTimestamp(), expiresAt });
+  await assertSucceeds(at("race:abc", race("r1", "setup"), Timestamp.fromMillis(Date.now() + 7 * 864e5)));
+  await assertSucceeds(write("host", "race:abc", race("r1", "setup"))); // without one: older copies of the app
+  await assertFails(at("race:abc", race("r1", "setup"), "next week"));
 });

@@ -124,3 +124,52 @@ redeploys the app, not the rules.
 
 If step 1 says "Couldn't start spectator betting", the rules probably aren't
 deployed, or anonymous sign-in isn't enabled.
+
+## Part E — clean-up, abuse protection, usage (optional, in the console)
+
+None of this is needed for a game night. Each is a one-off.
+
+### Clean-up of old games
+
+Every shared document carries an `expiresAt` a week after it was last written.
+A time-to-live policy makes Firestore delete documents once that's passed, so
+games nobody ended properly don't pile up.
+
+1. Open https://console.cloud.google.com/firestore/databases, pick project
+   `magical-athlete`, then the `(default)` database → **Time-to-live** →
+   **Create policy**.
+2. Collection group: `shared`. Timestamp field: `expiresAt`. **Create**.
+
+Deletion happens within a day or so of the date, not to the minute. If the
+console says time-to-live needs the paid (Blaze) plan, skip it: the leftovers
+are tiny and cost nothing on the free plan.
+
+### App Check (stops anyone scripting the database)
+
+The Firebase config in `src/firebase-config.js` is public, so in principle
+anyone could write a script that reads or floods the shared collection. App
+Check makes Firestore accept requests only from this app in a real browser.
+It's invisible to people using the app.
+
+1. Create a reCAPTCHA v3 key at https://www.google.com/recaptcha/admin/create:
+   type **Score based (v3)**, domains `magical-athlete.web.app` and
+   `magical-athlete.firebaseapp.com`. Keep the page open: it shows a **site
+   key** and a **secret key**.
+2. Firebase console → **Build → App Check → Apps** → the web app →
+   **reCAPTCHA** → paste the **secret key** → **Save**.
+3. Put the **site key** into `appCheckSiteKey` in `src/firebase-config.js`
+   (or ask Claude to). It's public by design. Push to `main` to deploy.
+4. Leave it a few days, then look at **App Check → APIs → Cloud Firestore**.
+   When nearly all requests show as **Verified**, press **Enforce**. Until
+   then nothing is blocked, so turning it on can't break game night.
+
+If spectator betting stops working after **Enforce**, press **Unenforce**.
+That takes effect within minutes.
+
+### Usage
+
+Firebase console → **Firestore Database → Usage** shows reads, writes and
+deletes per day. The free plan allows 50,000 reads, 20,000 writes and 20,000
+deletes a day. A game night with a few dozen spectators uses a small fraction
+of that. If a limit is hit, spectator betting stops until the next day
+(Pacific time), but nothing is charged.

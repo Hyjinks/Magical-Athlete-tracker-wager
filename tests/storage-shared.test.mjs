@@ -38,6 +38,7 @@ function fakeFirebase({ failSignIn = false } = {}) {
     getFirestore: () => ({ db: true }),
     memoryLocalCache: () => ({}),
     serverTimestamp: () => "SERVER_TIME",
+    Timestamp: { fromMillis: (ms) => ({ millis: ms }) },
     doc: (_db, collection, id) => {
       assert.equal(collection, "shared");
       return { kind: "doc", id };
@@ -84,23 +85,40 @@ function fakeFirebase({ failSignIn = false } = {}) {
       return { user };
     },
   };
-  const app = { getApps: () => [], getApp: () => ({}), initializeApp: () => ({}) };
+  const app = { getApps: () => [], getApp: () => ({}), initializeApp: () => ({ app: true }) };
+  const appCheckCalls = [];
+  const appCheck = {
+    ReCaptchaV3Provider: class {
+      constructor(key) {
+        this.key = key;
+      }
+    },
+    initializeAppCheck: (a, opts) => appCheckCalls.push({ a, key: opts.provider.key }),
+  };
+  const loads = [];
+  const load = async (opts) => {
+    loads.push(opts);
+    return { app, auth, firestore, appCheck: opts && opts.appCheck ? appCheck : null };
+  };
   // Simulates the signal dropping or coming back: listeners hear about it.
   const setOffline = (offline) => {
     net.offline = offline;
     for (const l of listeners) l.fire();
   };
-  return { load: async () => ({ app, auth, firestore }), stats, docs, tick, listeners, net, setOffline };
+  return { load, loads, appCheckCalls, stats, docs, tick, listeners, net, setOffline };
 }
 
 test("set writes the shape firestore.rules expects", async () => {
   const fb = fakeFirebase();
   const s = createFirebaseSharedStorage({ config: {}, loadFirebase: fb.load });
+  const before = Date.now();
   await s.set("join:1234", JSON.stringify({ pin: "1234", token: "abc", active: true }));
-  assert.deepEqual(fb.stats.writes[0], {
-    id: "join:1234",
-    data: { key: "join:1234", value: '{"pin":"1234","token":"abc","active":true}', owner: "phone-1", updatedAt: "SERVER_TIME" },
-  });
+  const { expiresAt, ...rest } = fb.stats.writes[0].data;
+  assert.equal(fb.stats.writes[0].id, "join:1234");
+  assert.deepEqual(rest, { key: "join:1234", value: '{"pin":"1234","token":"abc","active":true}', owner: "phone-1", updatedAt: "SERVER_TIME" });
+  // Expires a week after it was written (for the clean-up policy)
+  const week = 7 * 24 * 60 * 60 * 1000;
+  assert.ok(expiresAt.millis >= before + week && expiresAt.millis <= Date.now() + week);
   s._dispose();
 });
 
@@ -222,4 +240,20 @@ test("reads say when they may be out of date, and when a write is still pending"
   await s.set("bet:abc:r1:b1", "x");
   assert.equal((await s.get("bet:abc:r1:b1")).pending, true);
   s._dispose();
+});
+
+test("App Check is only switched on when there's a site key", async () => {
+  const off = fakeFirebase();
+  const s1 = createFirebaseSharedStorage({ config: {}, loadFirebase: off.load });
+  await s1.set("race:abc", "x");
+  assert.deepEqual(off.loads, [{ appCheck: false }]);
+  assert.equal(off.appCheckCalls.length, 0);
+  s1._dispose();
+
+  const on = fakeFirebase();
+  const s2 = createFirebaseSharedStorage({ config: {}, loadFirebase: on.load, appCheckSiteKey: "site-key-123" });
+  await s2.set("race:abc", "x");
+  assert.deepEqual(on.loads, [{ appCheck: true }]);
+  assert.deepEqual(on.appCheckCalls, [{ a: { app: true }, key: "site-key-123" }]);
+  s2._dispose();
 });

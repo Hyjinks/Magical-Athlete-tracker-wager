@@ -747,6 +747,26 @@ async function suite(target) {
     check(/Hey, Gran/.test(await bodyText(fresh)), "one tap on Join goes back in");
     await fresh.close();
 
+    // Too big a bet is stopped on the phone
+    await tap(spec, /^Egg/, 150);
+    await spec.locator('input[placeholder="custom"]').fill("20000");
+    await tap(spec, /^Place bet$/, 400);
+    check(/Bets go up to 10,000/.test(await bodyText(spec)), "a bet over 10,000 is stopped with a plain message");
+
+    // A bet the server refuses outright is shown as not accepted, not retried
+    await spec.evaluate(() => {
+      const orig = window.storage.set;
+      window.__restoreSet = () => (window.storage.set = orig);
+      window.storage.set = (k, v, sh) =>
+        sh && k.startsWith("bet:") ? Promise.reject(Object.assign(new Error("denied"), { code: "permission-denied" })) : orig(k, v, sh);
+    });
+    await tap(spec, /^Egg/, 150);
+    await tap(spec, /^5$/, 150);
+    await tap(spec, /^Place bet$/, 600);
+    text = await bodyText(spec);
+    check(/That bet wasn't accepted: betting has closed/.test(text) && !/Sending…/.test(text), "a bet the server refuses says so, and isn't retried");
+    await spec.evaluate(() => window.__restoreSet());
+
     // A slow save: the first attempt times out but lands later anyway
     await spec.evaluate(() => {
       const orig = window.storage.set.bind(window.storage);

@@ -10,7 +10,7 @@ import { createRoot } from "react-dom/client";
 import App from "../magical-athlete-tracker.jsx";
 import { createLocalStorageApi } from "./storage-local.js";
 import { combineStorage, createFirebaseSharedStorage, loadFirebaseModules } from "./storage-shared-firebase.js";
-import { firebaseConfig } from "./firebase-config.js";
+import { appCheckSiteKey, firebaseConfig } from "./firebase-config.js";
 import "./styles.css";
 
 const personal = createLocalStorageApi();
@@ -19,7 +19,7 @@ const personal = createLocalStorageApi();
 const shared =
   window.__MA_SHARED_BACKEND__ === "local"
     ? personal
-    : createFirebaseSharedStorage({ config: firebaseConfig, loadFirebase: loadFirebaseModules });
+    : createFirebaseSharedStorage({ config: firebaseConfig, loadFirebase: loadFirebaseModules, appCheckSiteKey });
 
 window.storage = combineStorage(personal, shared);
 

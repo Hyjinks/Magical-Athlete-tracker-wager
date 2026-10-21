@@ -30,6 +30,9 @@
 // own write to it hasn't reached the server yet (`pending`).
 
 const COLLECTION = "shared";
+// Every write sets `expiresAt` this far ahead. A Firestore time-to-live policy
+// on that field (docs/DEPLOY.md) deletes games nobody has touched for a week.
+const EXPIRES_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 const FIRST_SNAPSHOT_TIMEOUT_MS = 10000;
 const IDLE_UNSUBSCRIBE_MS = 90000;
 // A write with no signal never fails on its own (Firestore just waits), so the
@@ -57,7 +60,7 @@ const withTimeout = (promise, ms, message) =>
 
 // `loadFirebase` returns { app, auth, firestore } module namespaces. Injected so
 // the unit tests can pass a fake Firestore.
-export function createFirebaseSharedStorage({ config, loadFirebase }) {
+export function createFirebaseSharedStorage({ config, loadFirebase, appCheckSiteKey = "" }) {
   let ready = null; // Promise<{ fs, db, uid }>
   const docWatch = new Map(); // key -> { value, ready: Promise, unsubscribe, lastUsed }
   const listWatch = new Map(); // prefix -> { keys, ready, unsubscribe, lastUsed }
@@ -65,8 +68,15 @@ export function createFirebaseSharedStorage({ config, loadFirebase }) {
   const connect = () => {
     if (!ready) {
       ready = (async () => {
-        const { app: appMod, auth: authMod, firestore: fs } = await loadFirebase();
-        const app = appMod.getApps().length ? appMod.getApp() : appMod.initializeApp(config);
+        const { app: appMod, auth: authMod, firestore: fs, appCheck } = await loadFirebase({ appCheck: !!appCheckSiteKey });
+        const fresh = !appMod.getApps().length;
+        const app = fresh ? appMod.initializeApp(config) : appMod.getApp();
+        if (fresh && appCheckSiteKey && appCheck) {
+          appCheck.initializeAppCheck(app, {
+            provider: new appCheck.ReCaptchaV3Provider(appCheckSiteKey),
+            isTokenAutoRefreshEnabled: true,
+          });
+        }
         const auth = authMod.getAuth(app);
         // Reuse this phone's anonymous account if it already has one.
         const existing = await new Promise((resolve) => {
@@ -239,6 +249,7 @@ export function createFirebaseSharedStorage({ config, loadFirebase }) {
           value: String(value),
           owner: uid,
           updatedAt: fs.serverTimestamp(),
+          expiresAt: fs.Timestamp.fromMillis(Date.now() + EXPIRES_AFTER_MS),
         }),
         WRITE_TIMEOUT_MS,
         "Timed out saving shared data"
@@ -268,11 +279,15 @@ export function createFirebaseSharedStorage({ config, loadFirebase }) {
   };
 }
 
-// The real thing: Firebase is fetched on first use, as its own chunk.
-export function loadFirebaseModules() {
-  return Promise.all([import("firebase/app"), import("firebase/auth"), import("firebase/firestore")]).then(
-    ([app, auth, firestore]) => ({ app, auth, firestore })
-  );
+// The real thing: Firebase is fetched on first use, as its own chunk (App
+// Check only when it's switched on).
+export function loadFirebaseModules({ appCheck = false } = {}) {
+  return Promise.all([
+    import("firebase/app"),
+    import("firebase/auth"),
+    import("firebase/firestore"),
+    appCheck ? import("firebase/app-check") : null,
+  ]).then(([app, auth, firestore, appCheckMod]) => ({ app, auth, firestore, appCheck: appCheckMod }));
 }
 
 // window.storage for the web app: personal keys from `personal` (this phone),
