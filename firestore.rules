@@ -15,6 +15,11 @@ rules_version = '2';
 // exceptions: a join code that's been switched off (or left untouched for
 // 12 hours) can be claimed by a new game, and a host can clear the bets
 // placed on their own game.
+//
+// A new bet is only accepted while that race's betting is open: the race
+// snapshot (whose JSON always starts {"raceId":…,"status":…) must be for the
+// bet's race and say "setup". A stored bet can be sent again unchanged (the
+// app retries slow saves with the same id) but never altered.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -54,6 +59,14 @@ service cloud.firestore {
         return resource.data.owner == request.auth.uid;
       }
 
+      // The bet's race is the one in the snapshot, and its betting is open.
+      // Anchored to the start of the JSON, so text inside names can't fake it.
+      function bettingOpenFor(id) {
+        return get(raceOf(id)).data.value.matches(
+          '[{]"raceId":"' + id.split(':')[2] + '","status":"setup"[,}].*'
+        );
+      }
+
       // A join code another game can take over: switched off, or abandoned.
       function joinIsFree() {
         return resource.data.value.matches('.*"active":false.*')
@@ -67,11 +80,12 @@ service cloud.firestore {
       allow create: if signedIn() && validShape()
         && (isJoin(docId)
             || isRace(docId)
-            || (isBet(docId) && exists(raceOf(docId))));
+            || (isBet(docId) && exists(raceOf(docId)) && bettingOpenFor(docId)));
 
       allow update: if signedIn() && validShape()
-        && (isJoin(docId) || isRace(docId) || isBet(docId))
-        && (ownsIt() || (isJoin(docId) && joinIsFree()));
+        && ((isJoin(docId) && (ownsIt() || joinIsFree()))
+            || (isRace(docId) && ownsIt())
+            || (isBet(docId) && ownsIt() && request.resource.data.value == resource.data.value));
 
       allow delete: if signedIn()
         && (ownsIt()

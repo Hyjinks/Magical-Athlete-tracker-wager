@@ -27,7 +27,7 @@ writeFileSync(file, out.outputFiles[0].text);
 const app = await import(pathToFileURL(file).href);
 rmSync(dir, { recursive: true, force: true });
 
-const { betPayout, placeOddsFor, nameKey, spectatorBetProblem, betValue } = app;
+const { betPayout, placeOddsFor, nameKey, spectatorBetProblem, betValue, MAX_BET } = app;
 
 test("place odds sit between 1x and the win odds", () => {
   assert.equal(placeOddsFor(0), 0);
@@ -70,15 +70,30 @@ test("names match ignoring case and spaces", () => {
 
 test("a spectator's bet under another phone's name is turned down", () => {
   const names = { mary: "phone1" };
-  assert.equal(spectatorBetProblem({ bettorName: "mary", bettorId: "phone1" }, names), null);
-  assert.equal(spectatorBetProblem({ bettorName: "MARY ", bettorId: "phone2" }, names), "name");
-  assert.equal(spectatorBetProblem({ bettorName: "Mary B", bettorId: "phone2" }, names), null);
+  const b = (bettorName, bettorId) => ({ bettorName, bettorId, racerId: "hare", amount: 10, betType: "win" });
+  assert.equal(spectatorBetProblem(b("mary", "phone1"), names), null);
+  assert.equal(spectatorBetProblem(b("MARY ", "phone2"), names), "name");
+  assert.equal(spectatorBetProblem(b("Mary B", "phone2"), names), null);
   // Bets with no phone id (typed on the host, or an older app) aren't checked.
-  assert.equal(spectatorBetProblem({ bettorName: "Mary" }, names), null);
+  assert.equal(spectatorBetProblem(b("Mary", undefined), names), null);
 });
 
 test("a bet is always stored the same way, so a retry is an exact overwrite", () => {
   const b = { id: "b1", raceId: "r1", bettorName: "Mary", bettorId: "p1", racerId: "hare", amount: 10, betType: "win", state: "sending" };
   assert.equal(betValue(b), betValue({ ...b, state: "placed" }));
   assert.deepEqual(JSON.parse(betValue(b)), { id: "b1", bettorName: "Mary", bettorId: "p1", racerId: "hare", amount: 10, betType: "win" });
+});
+
+test("the host turns down late or nonsensical bets", () => {
+  const ok = { bettorName: "Gran", bettorId: "p1", racerId: "hare", amount: 10, betType: "win" };
+  const odds = { hare: 3 };
+  assert.equal(spectatorBetProblem(ok, {}, { open: true, odds }), null);
+  assert.equal(spectatorBetProblem(ok, {}, { open: false, odds }), "closed");
+  assert.equal(spectatorBetProblem({ ...ok, racerId: "egg" }, {}, { odds }), "invalid");
+  for (const amount of [0, -5, NaN, Infinity, "10", MAX_BET + 1]) {
+    assert.equal(spectatorBetProblem({ ...ok, amount }, {}, { odds }), "invalid", `amount ${amount}`);
+  }
+  assert.equal(spectatorBetProblem({ ...ok, amount: MAX_BET }, {}, { odds }), null);
+  assert.equal(spectatorBetProblem({ ...ok, betType: "each-way" }, {}, { odds }), "invalid");
+  assert.equal(spectatorBetProblem({ ...ok, betType: undefined }, {}, { odds }), null); // older app: a win bet
 });

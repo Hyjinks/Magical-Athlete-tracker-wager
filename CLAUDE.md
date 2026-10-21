@@ -87,10 +87,27 @@ npm run check
   (`npx firebase-tools deploy --only firestore:rules`; the GitHub Action only
   deploys hosting). When sweeping a session, delete bets before the `race:`
   doc — the rules let the host delete spectators' bets only while it owns that
-  doc. The rules can't be tested here (no emulator download); the smoke test
-  sets `window.__MA_SHARED_BACKEND__ = "local"` and uses two pages in one
-  browser context as host and spectator, and `tests/storage-shared.test.mjs`
-  checks the adapter against a fake Firestore.
+  doc. The rules also accept a new bet only while the race snapshot is for that
+  bet's race and says `"status":"setup"` — they match the start of the JSON, so
+  **the snapshot object must keep `raceId` then `status` as its first two keys**
+  — and a stored bet can only be rewritten unchanged (retries reuse the bet's id;
+  `betValue()` is the one place a bet's stored JSON is made).
+  **Test rule changes with `npm run test:rules`** (needs Java; it downloads the
+  Firestore emulator once into `node_modules/.cache`; not part of `npm run check`).
+  The smoke test sets `window.__MA_SHARED_BACKEND__ = "local"` and uses pages in
+  one browser context as host and spectators (`window.__MA_SPECTATOR_ID__` gives
+  a page its own phone id), and `tests/storage-shared.test.mjs` checks the
+  adapter against a fake Firestore.
+- **Spectator betting.** Firestore reads come from live listeners, so they never
+  fail offline — they return the last value with `stale: true` (and `pending:
+  true` for this phone's own unconfirmed write). Anything showing "live" data
+  must treat stale as a miss (`SYNC_TROUBLE_MS`). A spectator's phone keeps
+  `spectator-session` (which game, to rejoin after a reload), `spectator-bets`
+  (its bets on the current race, each `sending` / `placed` / `rejected`) and
+  `spectator-id` (random, per phone). The host keeps `spectatorNames` (name →
+  phone, first to bet keeps it; shared as `takenNames`) and turns bets down with
+  `spectatorBetProblem()` — late (past `LATE_BET_GRACE_MS`), invalid, or someone
+  else's name — by deleting them; the spectator's phone notices and says why.
 - **Service worker (web app).** It caches the whole app so it opens on patchy Wi-Fi,
   and updates itself the next time the app is opened. `firebase.json` stops
   `index.html` and `sw.js` being cached by the browser so updates are seen. The smoke
@@ -154,6 +171,8 @@ src/styles.css                Tailwind input + page base styles (both builds)
 firebase.json, docs/DEPLOY.md Firebase Hosting config and setup steps
 tests/smoke.mjs               headless phone-size play-through of both builds
 tests/storage-shared.test.mjs Firestore adapter against a fake Firestore
+tests/logic.test.mjs          payouts, names, bet checks (app bundled with esbuild)
+tests/rules.test.mjs          firestore.rules on the emulator (npm run test:rules)
 archive/                      old versions, reference only (not built or linted)
 ```
 

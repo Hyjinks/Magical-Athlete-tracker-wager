@@ -731,6 +731,10 @@ export default function App() {
   // fresh (not from a cache); a race update counts once it's confirmed saved.
   // If neither has happened for a while, spectators are seeing an old race
   // and the host is told.
+  // When betting closed for this race (the race started), for LATE_BET_GRACE_MS.
+  const bettingClosedAtRef = useRef(null);
+  const betsRef = useRef([]);
+  const oddsRef = useRef({});
   const syncOkAtRef = useRef(Date.now());
   const syncWriteSinceRef = useRef(null); // when the oldest unconfirmed race update was sent
   const resendSnapshotRef = useRef(null); // the latest race update, if it didn't get through
@@ -916,6 +920,11 @@ export default function App() {
   const spectatorNamesRef = useRef(spectatorNames);
   spectatorNamesRef.current = spectatorNames;
   const [odds, setOdds] = useState({}); // racerId -> fixed decimal odds, set by the "bookie"
+  betsRef.current = bets;
+  oddsRef.current = odds;
+  // Betting closes when the race leaves setup.
+  if (status === "setup") bettingClosedAtRef.current = null;
+  else if (bettingClosedAtRef.current == null) bettingClosedAtRef.current = Date.now();
 
   // bet form
   const [betBettor, setBetBettor] = useState("");
@@ -1832,7 +1841,14 @@ export default function App() {
             // skip a bad record
           }
           if (!bet) continue;
-          const reason = spectatorBetProblem(bet, names);
+          // Already in this race's pool (the host reloaded): keep it.
+          if (betsRef.current.some((b) => b.id === bet.id)) {
+            fetched.push(bet);
+            continue;
+          }
+          const closedAt = bettingClosedAtRef.current;
+          const open = closedAt == null || Date.now() - closedAt <= LATE_BET_GRACE_MS;
+          const reason = spectatorBetProblem(bet, names, { open, odds: oddsRef.current });
           if (reason) {
             // Turned down: removed from shared storage, and the spectator's
             // phone notices it's gone and says why.
@@ -3499,12 +3515,24 @@ export function nameKey(name) {
 }
 
 // Why the host turns down a bet from a spectator's phone, or null if it's
-// fine. `names` maps name keys to the phone that has that name.
-export function spectatorBetProblem(bet, names) {
+// fine. `names` maps name keys to the phone that has that name; `open` is
+// whether betting is still open (or only just closed); `odds` the posted odds.
+export const MAX_BET = 10000;
+export function spectatorBetProblem(bet, names, { open = true, odds = null } = {}) {
+  if (!open) return "closed";
+  const amount = bet.amount;
+  if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0 || amount > MAX_BET) return "invalid";
+  if (bet.betType != null && bet.betType !== "win" && bet.betType !== "place") return "invalid";
+  if (odds && !odds[bet.racerId]) return "invalid";
   const owner = names[nameKey(bet.bettorName)];
   if (bet.bettorId && owner && owner !== bet.bettorId) return "name";
   return null;
 }
+
+// A bet that was on its way when the race started still counts if it reaches
+// the host within this long. (With Firestore, the rules close betting exactly;
+// this is the backstop for other storage.)
+export const LATE_BET_GRACE_MS = 8000;
 
 function SpectatorView({ onLeave, initialPin = "" }) {
   const { seen: onboardingSeen, dismiss: dismissOnboarding } = useOnboarding();

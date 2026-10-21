@@ -12,7 +12,8 @@
     "build": "npm run build:artifact && npm run build:web",
     "preview": "vite preview",
     "test": "node --test tests/storage-shared.test.mjs tests/logic.test.mjs && node tests/smoke.mjs",
-    "check": "npm run lint && npm run build && npm test"
+    "check": "npm run lint && npm run build && npm test",
+    "test:rules": "node scripts/test-rules.mjs"
   },
   "dependencies": {
     "firebase": "^12.19.0",
@@ -22,6 +23,7 @@
     "react-dom": "18.3.1"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
     "@vitejs/plugin-react": "^6.1.1",
     "autoprefixer": "^10.6.1",
     "esbuild": "^0.28.2",

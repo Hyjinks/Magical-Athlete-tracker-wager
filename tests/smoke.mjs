@@ -855,6 +855,42 @@ async function suite(target) {
     await ctx.close();
   }
 
+  // ---------------------------------------------------------------------------
+  console.log("\nNo bets after the race starts");
+  {
+    const { ctx, page: host, errors } = await openApp();
+    const pin = await hostWithSpectators(host);
+    const spec = await openPage(ctx, `${PAGE_URL}${PAGE_URL.includes("?") ? "&" : "?"}join=${pin}`, errors);
+    await tap(spec, /^Skip$/).catch(() => {});
+    await spec.locator('input[placeholder="Your name"]').fill("Gran");
+    await tap(spec, /^Join$/, 1500);
+    await tap(spec, /^Got it$/).catch(() => {});
+    // The spectator's screen is stuck on the race before it started
+    await spec.evaluate(async () => {
+      const orig = window.storage.get;
+      const raceKey = (await window.storage.list("race:", true)).keys[0];
+      const frozen = await orig(raceKey, true);
+      window.__unfreeze = () => (window.storage.get = orig);
+      window.storage.get = async (k, sh) => (sh && k.startsWith("race:") ? frozen : orig(k, sh));
+    });
+    await tap(host, /^Racers$/, 400);
+    await tap(host, /^Lock roster/, 800);
+    await tap(host, /^Got it$/).catch(() => {});
+    await host.waitForTimeout(9000); // past the grace period
+    await tap(spec, /^Banana/, 150);
+    await tap(spec, /^10$/, 150);
+    await tap(spec, /^Place bet$/, 600);
+    await spec.evaluate(() => window.__unfreeze());
+    await spec.waitForTimeout(20000);
+    check(/Not accepted: betting had closed/.test(await bodyText(spec)), "a bet sent after the start is shown as not accepted");
+    const left = await host.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("ma-s:bet:")).length);
+    check(left === 0, `the late bet is removed and not in the host's pool (${left} stored)`);
+    await tap(host, /^Betting$/, 400);
+    check(!/Gran/.test(await bodyText(host)), "the host never counts it");
+    check(errors.length === 0, `no errors${errors.length ? `: ${errors.join(" / ")}` : ""}`);
+    await ctx.close();
+  }
+
   if (target === "web") {
     console.log("\nSpectator betting with no internet (real Firestore code)");
     const { ctx, page, errors } = await openApp({ sharedBackend: "firebase" });
