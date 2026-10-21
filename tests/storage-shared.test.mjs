@@ -15,11 +15,19 @@ function fakeFirebase({ failSignIn = false } = {}) {
   let user = null;
   const tick = () => new Promise((r) => setTimeout(r, 0));
 
+  // `net.offline`: snapshots come from the cache; `net.pending`: ids written
+  // on this phone that the server hasn't confirmed.
+  const net = { offline: false, pending: new Set() };
   const snapshotFor = (target) =>
     target.kind === "doc"
-      ? { exists: () => docs.has(target.id), data: () => docs.get(target.id) }
+      ? {
+          exists: () => docs.has(target.id),
+          data: () => docs.get(target.id),
+          metadata: { fromCache: net.offline, hasPendingWrites: net.pending.has(target.id) },
+        }
       : {
           docs: [...docs.keys()].filter((id) => id >= target.lo && id < target.hi).sort().map((id) => ({ id })),
+          metadata: { fromCache: net.offline, hasPendingWrites: false },
         };
   const notify = (id) => {
     for (const l of listeners) if (l.match(id)) l.fire();
@@ -42,7 +50,8 @@ function fakeFirebase({ failSignIn = false } = {}) {
       assert.equal(hi.op, "<");
       return { kind: "query", lo: lo.value, hi: hi.value };
     },
-    onSnapshot: (target, next) => {
+    onSnapshot: (target, options, next) => {
+      assert.deepEqual(options, { includeMetadataChanges: true });
       stats.subscriptions++;
       const l = {
         match: (id) => (target.kind === "doc" ? id === target.id : id >= target.lo && id < target.hi),
@@ -76,7 +85,12 @@ function fakeFirebase({ failSignIn = false } = {}) {
     },
   };
   const app = { getApps: () => [], getApp: () => ({}), initializeApp: () => ({}) };
-  return { load: async () => ({ app, auth, firestore }), stats, docs, tick, listeners };
+  // Simulates the signal dropping or coming back: listeners hear about it.
+  const setOffline = (offline) => {
+    net.offline = offline;
+    for (const l of listeners) l.fire();
+  };
+  return { load: async () => ({ app, auth, firestore }), stats, docs, tick, listeners, net, setOffline };
 }
 
 test("set writes the shape firestore.rules expects", async () => {
@@ -96,7 +110,7 @@ test("get returns the value, or null when missing", async () => {
   assert.equal(await s.get("race:abc"), null);
   await s.set("race:abc", "snapshot");
   await fb.tick();
-  assert.deepEqual(await s.get("race:abc"), { key: "race:abc", value: "snapshot", shared: true });
+  assert.deepEqual(await s.get("race:abc"), { key: "race:abc", value: "snapshot", shared: true, stale: false, pending: false });
   s._dispose();
 });
 
@@ -182,4 +196,30 @@ test("combineStorage sends shared keys to the shared backend only", async () => 
   await st.list("bet:", true);
   await st.delete("theme-preference");
   assert.deepEqual(calls, ["local.get games", "cloud.set race:1", "cloud.list bet:", "local.delete theme-preference"]);
+});
+
+test("reads say when they may be out of date, and when a write is still pending", async () => {
+  const fb = fakeFirebase();
+  const s = createFirebaseSharedStorage({ config: {}, loadFirebase: fb.load });
+  await s.set("race:abc", "v1");
+  let r = await s.get("race:abc");
+  assert.equal(r.stale, false);
+  assert.equal(r.pending, false);
+  assert.equal((await s.list("race:")).stale, false);
+
+  fb.setOffline(true);
+  await fb.tick();
+  r = await s.get("race:abc");
+  assert.equal(r.value, "v1", "the last value is still returned");
+  assert.equal(r.stale, true);
+  assert.equal((await s.list("race:")).stale, true);
+
+  fb.setOffline(false);
+  await fb.tick();
+  assert.equal((await s.get("race:abc")).stale, false);
+
+  fb.net.pending.add("bet:abc:r1:b1");
+  await s.set("bet:abc:r1:b1", "x");
+  assert.equal((await s.get("bet:abc:r1:b1")).pending, true);
+  s._dispose();
 });

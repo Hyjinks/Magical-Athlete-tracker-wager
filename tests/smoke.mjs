@@ -187,6 +187,26 @@ async function startHosting(page, { reducedMotion = false } = {}) {
   if (!reducedMotion) await tap(page, /Let's race/, 1200);
 }
 
+// Host with three racers, odds posted and spectator betting on. Returns the join code.
+async function hostWithSpectators(host) {
+  await startHosting(host);
+  await tap(host, /^Add racer$/);
+  const players = host.locator('input[placeholder="Who is racing?"]');
+  const names = host.locator('input[placeholder^="Racer"]');
+  for (const [i, [p, r]] of [["Adam", "Hare"], ["Ann", "Banana"], ["Ari", "Egg"]].entries()) {
+    await players.nth(i).fill(p);
+    await names.nth(i).fill(r);
+    await host.keyboard.press("Escape");
+  }
+  await tap(host, /^Betting$/, 400);
+  await tap(host, /Post odds/, 400);
+  await tap(host, /Enable spectator betting/, 800);
+  return host.evaluate(() => {
+    const b = [...document.querySelectorAll("button[aria-label^='Join code']")][0];
+    return b ? b.innerText.replace(/\D/g, "").slice(0, 4) : null;
+  });
+}
+
 async function setUpRace(page, track, opts) {
   await startHosting(page, opts);
   await tap(page, track === "wild" ? /^Wild Wilds/ : /^Mild Mile/);
@@ -631,6 +651,83 @@ async function suite(target) {
     check(/The race is finished\. You won/.test(after), "spectator is told plainly how their bet went");
     check(/Leaderboard/.test(after) && /Gran \(you\)/.test(after), "spectator sees the leaderboard with themselves marked");
     await spec.screenshot({ path: join(SHOTS, "spectator-finished.png") });
+    check(errors.length === 0, `no errors${errors.length ? `: ${errors.join(" / ")}` : ""}`);
+    await ctx.close();
+  }
+
+  // ---------------------------------------------------------------------------
+  console.log("\nA spectator's phone keeps its place and its bets");
+  {
+    const { ctx, page: host, errors } = await openApp();
+    const pin = await hostWithSpectators(host);
+    const spec = await openPage(ctx, `${PAGE_URL}${PAGE_URL.includes("?") ? "&" : "?"}join=${pin}`, errors);
+    await tap(spec, /^Skip$/).catch(() => {});
+    await spec.locator('input[placeholder="Your name"]').fill("Gran");
+    await tap(spec, /^Join$/, 1500);
+    await tap(spec, /^Got it$/).catch(() => {});
+    await tap(spec, /^Banana/, 150);
+    await tap(spec, /^10$/, 150);
+    await tap(spec, /^Place bet$/, 600);
+
+    // Reload: straight back in, bet still listed
+    await spec.reload();
+    await spec.waitForTimeout(2500);
+    let text = await bodyText(spec);
+    check(/Hey, Gran/.test(text) && (await spec.locator('input[placeholder="Your name"]').count()) === 0, "after a reload the spectator is back in the game without retyping");
+    check(/Your bets/.test(text) && /Banana/.test(text), "after a reload the spectator's bets are still listed");
+
+    // Opened again from the start screen: the code is waiting, one tap goes back
+    const fresh = await openPage(ctx, PAGE_URL, errors);
+    await tap(fresh, /^Skip$/).catch(() => {});
+    check(new RegExp(`Watching game ${pin} as Gran`).test(await bodyText(fresh)), "the start screen offers to go back to the game");
+    await tap(fresh, /^Join$/, 2500);
+    check(/Hey, Gran/.test(await bodyText(fresh)), "one tap on Join goes back in");
+    await fresh.close();
+
+    // A slow save: the first attempt times out but lands later anyway
+    await spec.evaluate(() => {
+      const orig = window.storage.set.bind(window.storage);
+      let first = true;
+      window.storage.set = (k, v, sh) => {
+        if (sh && k.startsWith("bet:") && first) {
+          first = false;
+          setTimeout(() => orig(k, v, sh), 7000); // lands after the first retry
+          return Promise.reject(new Error("Timed out saving shared data"));
+        }
+        return orig(k, v, sh);
+      };
+    });
+    await tap(spec, /^Egg/, 150);
+    await tap(spec, /^5$/, 150);
+    await tap(spec, /^Place bet$/, 600);
+    text = await bodyText(spec);
+    check(/Still sending your bet/.test(text) && /No need to place it again/.test(text), "a slow bet says it's still sending, not that it failed");
+    check(/Sending…/.test(text), "the slow bet is listed as sending");
+    await spec.waitForTimeout(9500);
+    text = await bodyText(spec);
+    check(!/Sending…/.test(text) && !/Still sending/.test(text), "once it gets through, the bet shows as placed");
+    const betKeys = await host.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("ma-s:bet:")).length);
+    check(betKeys === 2, `retrying never doubles a bet (${betKeys} bets stored, expected 2)`);
+
+    // Finish the race; the result survives a reload too
+    await host.waitForTimeout(4500);
+    await tap(host, /^Racers$/, 400);
+    await tap(host, /^Lock roster/, 800);
+    await tap(host, /^Got it$/).catch(() => {});
+    for (const name of ["Banana", "Hare"]) {
+      const row = new RegExp(`^\\d+ (🎲 )?${name}`);
+      await tap(host, row, 300);
+      if ((await host.locator('input[placeholder="0–30"]').count()) === 0) await tap(host, row, 300);
+      await host.locator('input[placeholder="0–30"]').first().fill("30");
+      await tap(host, /^Go$/, 500);
+    }
+    await tap(host, /^Betting$/, 400);
+    await tap(host, /^Got it$/).catch(() => {});
+    await tap(host, /^Save result$/, 800);
+    await spec.waitForTimeout(4800);
+    await spec.reload();
+    await spec.waitForTimeout(3000);
+    check(/The race is finished\. You won/.test(await bodyText(spec)), "after a reload at the end, the spectator is still told they won");
     check(errors.length === 0, `no errors${errors.length ? `: ${errors.join(" / ")}` : ""}`);
     await ctx.close();
   }

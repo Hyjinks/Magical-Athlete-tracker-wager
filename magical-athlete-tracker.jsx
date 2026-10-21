@@ -3030,6 +3030,21 @@ function ModeChooser({ onHost, onJoin, historyIndex = [], resume = null, leaving
   const [pin, setPin] = useState("");
   const [lastRace, setLastRace] = useState(null);
 
+  // A game this phone was watching as a spectator: its code is filled in, so
+  // one tap on Join goes back to it.
+  const [specResume, setSpecResume] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    loadSpectatorSession().then((s) => {
+      if (cancelled || !s) return;
+      setSpecResume(s);
+      setPin((cur) => cur || s.pin);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // One cheap read for the "last race" line. Failure just hides the line.
   const newestId = historyIndex[0] || null;
   useEffect(() => {
@@ -3329,6 +3344,12 @@ function ModeChooser({ onHost, onJoin, historyIndex = [], resume = null, leaving
         </div>
       </form>
 
+      {specResume && pin === specResume.pin && (
+        <p className="text-center text-base font-semibold mt-3" style={{ color: "var(--onBg)" }}>
+          Watching game {specResume.pin} as {specResume.name}? Tap Join to go back.
+        </p>
+      )}
+
       <p
         className="lp-rise text-center text-xs mt-5"
         style={{ color: "var(--onBg)", animationDelay: "1s" }}
@@ -3337,6 +3358,31 @@ function ModeChooser({ onHost, onJoin, historyIndex = [], resume = null, leaving
       </p>
     </div>
   );
+}
+
+// A spectator's phone remembers which game it joined (so a reload or reopening
+// goes straight back in) and its bets on the current race (so they aren't
+// lost). Personal keys, on this phone only.
+const SPECTATOR_SESSION_KEY = "spectator-session"; // { pin, token, name, savedAt }
+const SPECTATOR_BETS_KEY = "spectator-bets"; // { token, raceId, bets }
+const SPECTATOR_RESUME_MS = 12 * 60 * 60 * 1000; // same as a join code's lifetime
+
+async function loadSpectatorSession() {
+  try {
+    const res = await window.storage.get(SPECTATOR_SESSION_KEY, false);
+    const s = res ? JSON.parse(res.value) : null;
+    if (!s || !/^\d{4}$/.test(s.pin) || typeof s.token !== "string" || typeof s.name !== "string") return null;
+    if (!(Date.now() - (s.savedAt || 0) < SPECTATOR_RESUME_MS)) return null;
+    return s;
+  } catch (e) {
+    return null;
+  }
+}
+
+// What's stored for a bet. Always the same for the same bet, so sending it
+// again is an exact overwrite (firestore.rules relies on that).
+export function betValue(b) {
+  return JSON.stringify({ id: b.id, bettorName: b.bettorName, racerId: b.racerId, amount: b.amount, betType: b.betType });
 }
 
 function SpectatorView({ onLeave, initialPin = "" }) {
@@ -3350,30 +3396,91 @@ function SpectatorView({ onLeave, initialPin = "" }) {
   const [spectatorName, setSpectatorName] = useState("");
   const [snapshot, setSnapshot] = useState(null);
   const [sessionActive, setSessionActive] = useState(true);
+  // This phone's bets on the current race. Each is { id, raceId, bettorName,
+  // racerId, amount, betType, state }, state being "sending" (not confirmed
+  // stored yet), "placed" or "rejected". Kept on the phone too, so a reload
+  // doesn't lose them.
   const [myBets, setMyBets] = useState([]);
+  const myBetsRef = useRef(myBets);
+  myBetsRef.current = myBets;
   const lastRaceIdRef = useRef(null);
+  const snapshotRef = useRef(null);
+  const restoredBetsRef = useRef(null); // { token, raceId, bets } saved on this phone
+  const sendingRef = useRef(new Set()); // ids of bets with a save in flight
+  const [rejoining, setRejoining] = useState(true); // checking for a game to go back to
 
   const [betRacer, setBetRacer] = useState("");
   const [betAmount, setBetAmount] = useState("");
   const [betType, setBetType] = useState("win"); // "win" | "place"
   const [betError, setBetError] = useState("");
   const [betNote, setBetNote] = useState("");
+  const [betSending, setBetSending] = useState("");
   const [offline, setOffline] = useState(false);
   const lastOkRef = useRef(Date.now());
 
-  // Remember the name from last time, so it doesn't have to be typed again.
+  // Checks the code and enters the game. `quiet` is for going back to a saved
+  // game: if it has ended, the join form just shows, with no error.
+  const enterGame = async (pin, name, { quiet = false } = {}) => {
+    const fail = (msg) => {
+      if (!quiet) setJoinError(msg);
+      return false;
+    };
+    try {
+      const res = await window.storage.get(`join:${pin}`, true);
+      if (!res) return fail("There's no game with that code. Double-check it with the host.");
+      const s = JSON.parse(res.value);
+      if (!s.active || !s.token) {
+        return fail("That game isn't taking spectators right now. Ask the host to turn spectator betting on.");
+      }
+      let restored = null;
+      try {
+        const r = await window.storage.get(SPECTATOR_BETS_KEY, false);
+        const saved = r ? JSON.parse(r.value) : null;
+        if (saved && saved.token === s.token && Array.isArray(saved.bets)) restored = saved;
+      } catch (e) {
+        // nothing saved, or unreadable — start with no bets
+      }
+      restoredBetsRef.current = restored;
+      setToken(s.token);
+      setJoinedPin(pin);
+      setSpectatorName(name);
+      window.storage.set("spectator-name", name, false).catch(() => {});
+      window.storage
+        .set(SPECTATOR_SESSION_KEY, JSON.stringify({ pin, token: s.token, name, savedAt: Date.now() }), false)
+        .catch(() => {});
+      setJoined(true);
+      return true;
+    } catch (e) {
+      return fail("Couldn't reach the game. Check your internet connection and try again.");
+    }
+  };
+
+  // On opening: go straight back into a game this phone was watching (a
+  // reload, or the app closed and reopened), as long as it's still running.
+  // Otherwise remember the name from last time, so it needn't be typed again.
   useEffect(() => {
     let cancelled = false;
-    window.storage
-      .get("spectator-name", false)
-      .then((res) => {
-        if (!cancelled && res && res.value) setNameInput((cur) => cur || String(res.value).slice(0, 40));
-      })
-      .catch(() => {});
+    (async () => {
+      const saved = await loadSpectatorSession();
+      if (cancelled) return;
+      if (saved && (!initialPin || initialPin === saved.pin)) {
+        setPinInput(saved.pin);
+        setNameInput(saved.name);
+        await enterGame(saved.pin, saved.name, { quiet: true });
+      } else {
+        try {
+          const res = await window.storage.get("spectator-name", false);
+          if (!cancelled && res && res.value) setNameInput((cur) => cur || String(res.value).slice(0, 40));
+        } catch (e) {
+          // type it again
+        }
+      }
+      if (!cancelled) setRejoining(false);
+    })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const join = async () => {
     setJoinError("");
@@ -3387,25 +3494,14 @@ function SpectatorView({ onLeave, initialPin = "" }) {
       setJoinError("Enter your name.");
       return;
     }
-    try {
-      const res = await window.storage.get(`join:${pin}`, true);
-      if (!res) {
-        setJoinError("There's no game with that code. Double-check it with the host.");
-        return;
-      }
-      const s = JSON.parse(res.value);
-      if (!s.active || !s.token) {
-        setJoinError("That game isn't taking spectators right now. Ask the host to turn spectator betting on.");
-        return;
-      }
-      setToken(s.token);
-      setJoinedPin(pin);
-      setSpectatorName(name);
-      window.storage.set("spectator-name", name, false).catch(() => {});
-      setJoined(true);
-    } catch (e) {
-      setJoinError("Couldn't reach the game. Check your internet connection and try again.");
-    }
+    await enterGame(pin, name);
+  };
+
+  // Leaving on purpose forgets the game, so the next visit starts fresh.
+  const leave = () => {
+    window.storage.delete(SPECTATOR_SESSION_KEY, false).catch(() => {});
+    window.storage.delete(SPECTATOR_BETS_KEY, false).catch(() => {});
+    onLeave();
   };
 
   useEffect(() => {
@@ -3421,10 +3517,19 @@ function SpectatorView({ onLeave, initialPin = "" }) {
             setBetRacer("");
             setBetAmount("");
             setBetNote("");
+            setBetSending("");
+          } else if (!lastRaceIdRef.current) {
+            const restored = restoredBetsRef.current;
+            if (restored && restored.raceId === snap.raceId) setMyBets(restored.bets);
+            restoredBetsRef.current = null;
           }
           lastRaceIdRef.current = snap.raceId;
+          snapshotRef.current = snap;
           setSnapshot(snap);
         }
+        // A value from the cache, or a phone that knows it's offline, isn't
+        // fresh: count it as a miss, so "Reconnecting…" shows.
+        if (res && res.stale) throw new Error("stale");
         lastOkRef.current = Date.now();
         if (!cancelled) setOffline(false);
       } catch (e) {
@@ -3449,26 +3554,108 @@ function SpectatorView({ onLeave, initialPin = "" }) {
     };
   }, [joined, token, joinedPin]);
 
+  // Keep this race's bets on the phone, so a reload brings them back.
+  useEffect(() => {
+    if (!joined || !token || !lastRaceIdRef.current) return;
+    window.storage
+      .set(SPECTATOR_BETS_KEY, JSON.stringify({ token, raceId: lastRaceIdRef.current, bets: myBets }), false)
+      .catch(() => {});
+  }, [joined, token, myBets]);
+
+  const betKey = (b) => `bet:${token}:${b.raceId}:${b.id}`;
+  const markBet = (id, patch) => setMyBets((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+
+  // Saves a bet under its own id. Sending the same bet again overwrites it,
+  // never adds a second one, so a retry can't double a bet.
+  const sendBet = async (b) => {
+    if (sendingRef.current.has(b.id)) return false;
+    sendingRef.current.add(b.id);
+    try {
+      await window.storage.set(betKey(b), betValue(b), true);
+      markBet(b.id, { state: "placed" });
+      return true;
+    } catch (e) {
+      return false;
+    } finally {
+      sendingRef.current.delete(b.id);
+    }
+  };
+
+  // Bets still sending (a slow save, or one restored after a reload) are
+  // retried every few seconds with the same id until they're confirmed.
+  const hasSending = myBets.some((b) => b.state === "sending");
+  useEffect(() => {
+    if (!joined || !token || !hasSending) return;
+    const retry = async () => {
+      const sending = myBetsRef.current.filter((b) => b.state === "sending");
+      for (const b of sending) {
+        if (sendingRef.current.has(b.id)) continue;
+        // The slow save may have landed after all. `pending` means it's only
+        // queued on this phone, not stored yet.
+        try {
+          const r = await window.storage.get(betKey(b), true);
+          if (r && !r.pending) {
+            markBet(b.id, { state: "placed" });
+            continue;
+          }
+          if (r) continue;
+        } catch (e) {
+          continue; // can't tell yet
+        }
+        const snap = snapshotRef.current;
+        if (!snap || snap.raceId !== b.raceId || snap.status !== "setup") {
+          markBet(b.id, { state: "rejected", reason: "closed" });
+          continue;
+        }
+        await sendBet(b);
+      }
+    };
+    const interval = setInterval(retry, 5000);
+    return () => clearInterval(interval);
+  }, [joined, token, hasSending]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Once nothing is still sending, the "still sending" message goes.
+  useEffect(() => {
+    if (!hasSending) setBetSending("");
+  }, [hasSending]);
+
   const placeBet = async () => {
     const amt = parseFloat(betAmount);
     if (!betRacer || !amt || amt <= 0 || !snapshot || !snapshot.odds[betRacer]) return;
-    const bet = { id: uid(), bettorName: spectatorName, racerId: betRacer, amount: amt, betType };
+    const bet = {
+      id: uid(),
+      raceId: snapshot.raceId,
+      bettorName: spectatorName,
+      racerId: betRacer,
+      amount: amt,
+      betType,
+      state: "sending",
+    };
     setMyBets((prev) => [...prev, bet]);
     setBetAmount("");
     setBetError("");
     setBetNote("");
-    try {
-      await window.storage.set(`bet:${token}:${snapshot.raceId}:${bet.id}`, JSON.stringify(bet), true);
-      const racerName = (snapshot.racers || []).find((r) => r.id === betRacer)?.name || "your racer";
-      setBetNote(`Bet placed: ${amt} on ${racerName} to ${betType === "win" ? "win" : "place (finish 1st or 2nd)"}.`);
-    } catch (e) {
-      // It didn't reach the host — take it back off this phone's list too, so
-      // nobody thinks a bet is down that the host never saw.
-      setMyBets((prev) => prev.filter((b) => b.id !== bet.id));
-      setBetAmount(String(amt));
-      setBetError("That bet didn't go through. Check your internet connection and tap Place bet again.");
+    setBetSending("");
+    const racerName = (snapshot.racers || []).find((r) => r.id === betRacer)?.name || "your racer";
+    const what = `${amt} on ${racerName} to ${betType === "win" ? "win" : "place (finish 1st or 2nd)"}`;
+    if (await sendBet(bet)) {
+      setBetNote(`Bet placed: ${what}.`);
+    } else {
+      // Not confirmed, but it may still get there (a slow signal). It stays in
+      // the list as "Sending…" and is retried with the same id.
+      setBetSending(`Still sending your bet (${what}). It'll go through when your signal's back. No need to place it again.`);
     }
   };
+
+  if (!joined && rejoining) {
+    return (
+      <Card>
+        <p className="text-lg text-center py-6" style={{ color: "var(--muted)" }}>
+          Rejoining the race…
+        </p>
+      </Card>
+    );
+  }
 
   if (!joined) {
     return (
@@ -3532,10 +3719,13 @@ function SpectatorView({ onLeave, initialPin = "" }) {
   const bettingOpen = snapshot.status === "setup" && sessionActive;
   const winnerId = snapshot.finishOrder && snapshot.finishOrder[0];
   const runnerUpId = snapshot.finishOrder && snapshot.finishOrder[1];
-  const myStaked = myBets.reduce((s, b) => s + b.amount, 0);
+  // Only bets confirmed stored count towards "You won" — the host's tally is
+  // the real one, and it never saw the rest.
+  const placedBets = myBets.filter((b) => (b.state || "placed") === "placed");
+  const myStaked = placedBets.reduce((s, b) => s + b.amount, 0);
   const myPayout =
     snapshot.status === "finished"
-      ? myBets.reduce((s, b) => s + betPayout(b, snapOdds, winnerId, runnerUpId), 0)
+      ? placedBets.reduce((s, b) => s + betPayout(b, snapOdds, winnerId, runnerUpId), 0)
       : 0;
 
   return (
@@ -3550,7 +3740,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
           <p className="font-display font-bold text-2xl" style={{ color: "var(--ink)" }}>
             Hey, {spectatorName}
           </p>
-          <button onClick={onLeave} className="text-base" style={{ color: "var(--muted)" }}>
+          <button onClick={leave} className="text-base" style={{ color: "var(--muted)" }}>
             Leave
           </button>
         </div>
@@ -3561,7 +3751,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
             ? "Betting open — pick a racer and an amount below."
             : snapshot.status === "racing"
             ? "The race is on! Positions update by themselves."
-            : myBets.length === 0
+            : placedBets.length === 0
             ? "The race is finished."
             : myPayout - myStaked >= 0
             ? `The race is finished. You won ${(myPayout - myStaked).toFixed(2)}!`
@@ -3783,6 +3973,11 @@ function SpectatorView({ onLeave, initialPin = "" }) {
               {betNote}
             </p>
           )}
+          {betSending && (
+            <p role="status" className="text-lg font-semibold mt-2" style={{ color: "var(--ink)" }}>
+              {betSending}
+            </p>
+          )}
         </Card>
       )}
 
@@ -3796,7 +3991,11 @@ function SpectatorView({ onLeave, initialPin = "" }) {
               const racerWinOdds = snapOdds[b.racerId] || 0;
               const applicableOdds = isWin ? racerWinOdds : placeOddsFor(racerWinOdds);
               return (
-                <div key={b.id} className="flex items-center justify-between text-base px-2 py-1">
+                <div key={b.id} className="px-2 py-1">
+                <div
+                  className="flex items-center justify-between text-base"
+                  style={b.state === "rejected" ? { opacity: 0.55, textDecoration: "line-through" } : undefined}
+                >
                   <span className="flex items-center gap-1.5">
                     {racer?.name}
                     <span
@@ -3813,6 +4012,21 @@ function SpectatorView({ onLeave, initialPin = "" }) {
                   <span className="font-mono">
                     {b.amount.toFixed(2)} @ ×{applicableOdds.toFixed(2)}
                   </span>
+                </div>
+                {b.state === "sending" && (
+                  <p className="text-base" style={{ color: "var(--muted)" }}>
+                    Sending…
+                  </p>
+                )}
+                {b.state === "rejected" && (
+                  <p className="text-base font-semibold" style={{ color: "var(--red)" }}>
+                    {b.reason === "removed"
+                      ? "Removed by the host."
+                      : b.reason === "name"
+                      ? "Not accepted: someone else is already betting under this name."
+                      : "Not accepted: betting had closed before it got through."}
+                  </p>
+                )}
                 </div>
               );
             })}

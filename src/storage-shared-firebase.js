@@ -22,6 +22,12 @@
 //
 // Firebase is only downloaded the first time a shared key is used, so a host
 // who never turns on spectator betting never loads it.
+//
+// Answering from memory means a read never fails when the signal drops — it
+// just keeps returning the last value. So every get/list also says whether
+// that value may be out of date (`stale`: Firestore is answering from its
+// cache, or the phone says it's offline) and, for get, whether this phone's
+// own write to it hasn't reached the server yet (`pending`).
 
 const COLLECTION = "shared";
 const FIRST_SNAPSHOT_TIMEOUT_MS = 10000;
@@ -29,6 +35,10 @@ const IDLE_UNSUBSCRIBE_MS = 90000;
 // A write with no signal never fails on its own (Firestore just waits), so the
 // app is told after this long and can say so. The write may still land later.
 const WRITE_TIMEOUT_MS = 15000;
+
+const LISTEN_OPTIONS = { includeMetadataChanges: true };
+
+const phoneOffline = () => typeof navigator !== "undefined" && navigator.onLine === false;
 
 const withTimeout = (promise, ms, message) =>
   new Promise((resolve, reject) => {
@@ -128,13 +138,16 @@ export function createFirebaseSharedStorage({ config, loadFirebase }) {
       return w;
     }
     const { fs, db } = await connect();
-    w = { value: null, lastUsed: Date.now(), unsubscribe: () => {} };
+    w = { value: null, fromCache: false, pending: false, lastUsed: Date.now(), unsubscribe: () => {} };
     docWatch.set(key, w);
     w.ready = firstSnapshot((onFirst, onError) =>
       fs.onSnapshot(
         fs.doc(db, COLLECTION, key),
+        LISTEN_OPTIONS,
         (snap) => {
           w.value = snap.exists() ? snap.data().value : null;
+          w.fromCache = !!snap.metadata?.fromCache;
+          w.pending = !!snap.metadata?.hasPendingWrites;
           onFirst();
         },
         (err) => {
@@ -162,7 +175,7 @@ export function createFirebaseSharedStorage({ config, loadFirebase }) {
       return w;
     }
     const { fs, db } = await connect();
-    w = { keys: [], lastUsed: Date.now(), unsubscribe: () => {} };
+    w = { keys: [], fromCache: false, lastUsed: Date.now(), unsubscribe: () => {} };
     listWatch.set(prefix, w);
     const q = fs.query(
       fs.collection(db, COLLECTION),
@@ -172,8 +185,10 @@ export function createFirebaseSharedStorage({ config, loadFirebase }) {
     w.ready = firstSnapshot((onFirst, onError) =>
       fs.onSnapshot(
         q,
+        LISTEN_OPTIONS,
         (snap) => {
           w.keys = snap.docs.map((d) => d.id);
+          w.fromCache = !!snap.metadata?.fromCache;
           onFirst();
         },
         (err) => {
@@ -212,7 +227,8 @@ export function createFirebaseSharedStorage({ config, loadFirebase }) {
     async get(key) {
       checkKey(key);
       const w = await watchDoc(key);
-      return w.value == null ? null : { key, value: w.value, shared: true };
+      if (w.value == null) return null;
+      return { key, value: w.value, shared: true, stale: w.fromCache || phoneOffline(), pending: w.pending };
     },
     async set(key, value) {
       checkKey(key);
@@ -238,7 +254,7 @@ export function createFirebaseSharedStorage({ config, loadFirebase }) {
     async list(prefix = "") {
       if (typeof prefix !== "string" || prefix.includes("/")) throw new Error(`Invalid shared prefix: ${prefix}`);
       const w = await watchList(prefix);
-      return { keys: [...w.keys], prefix, shared: true };
+      return { keys: [...w.keys], prefix, shared: true, stale: w.fromCache || phoneOffline() };
     },
     // For tests and hot reload.
     _dispose() {
