@@ -732,6 +732,60 @@ async function suite(target) {
     await ctx.close();
   }
 
+  // ---------------------------------------------------------------------------
+  console.log("\nLosing the signal: spectator and host are both told");
+  {
+    const { ctx, page: host, errors } = await openApp();
+    const pin = await hostWithSpectators(host);
+    const spec = await openPage(ctx, `${PAGE_URL}${PAGE_URL.includes("?") ? "&" : "?"}join=${pin}`, errors);
+    await tap(spec, /^Skip$/).catch(() => {});
+    await spec.locator('input[placeholder="Your name"]').fill("Gran");
+    await tap(spec, /^Join$/, 1500);
+    await tap(spec, /^Got it$/).catch(() => {});
+
+    // Shared reads that only come from a cache (what Firestore does offline):
+    // the old value keeps coming back, marked stale.
+    const goOffline = (page) =>
+      page.evaluate(() => {
+        const s = window.storage;
+        window.__online = { get: s.get, list: s.list, set: s.set };
+        s.get = async (k, sh) => {
+          const r = await window.__online.get(k, sh);
+          return sh && r ? { ...r, stale: true } : r;
+        };
+        s.list = async (p, sh) => {
+          const r = await window.__online.list(p, sh);
+          return sh ? { ...r, stale: true } : r;
+        };
+        s.set = (k, v, sh) => (sh ? Promise.reject(new Error("Timed out saving shared data")) : window.__online.set(k, v, sh));
+      });
+    const goOnline = (page) => page.evaluate(() => Object.assign(window.storage, window.__online));
+
+    await goOffline(spec);
+    await spec.waitForTimeout(17000);
+    check(/Reconnecting/.test(await bodyText(spec)), "a spectator whose signal drops sees Reconnecting…");
+    await goOnline(spec);
+    await spec.waitForTimeout(5000);
+    check(!/Reconnecting/.test(await bodyText(spec)), "and it clears when the signal's back");
+
+    // The host loses signal and starts the race meanwhile
+    await goOffline(host);
+    await tap(host, /^Racers$/, 400);
+    await tap(host, /^Lock roster/, 800);
+    await tap(host, /^Got it$/).catch(() => {});
+    await host.waitForTimeout(17000);
+    check(/Spectators can't see updates/.test(await bodyText(host)), "a host whose signal drops is told spectators can't see updates");
+    await host.screenshot({ path: join(SHOTS, "host-sync-warning.png") });
+    check(/Betting open/.test(await bodyText(spec)), "(the spectator still has the old race)");
+    await goOnline(host);
+    await host.waitForTimeout(5000);
+    check(!/Spectators can't see updates/.test(await bodyText(host)), "the host's warning clears when the signal's back");
+    await spec.waitForTimeout(4500);
+    check(/The race is on/.test(await bodyText(spec)), "and the spectator catches up without the host doing anything");
+    check(errors.length === 0, `no errors${errors.length ? `: ${errors.join(" / ")}` : ""}`);
+    await ctx.close();
+  }
+
   if (target === "web") {
     console.log("\nSpectator betting with no internet (real Firestore code)");
     const { ctx, page, errors } = await openApp({ sharedBackend: "firebase" });

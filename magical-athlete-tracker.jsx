@@ -727,6 +727,14 @@ export default function App() {
   const [sessionToken, setSessionToken] = useState(null);
   const [raceId, setRaceId] = useState(() => uid());
   const knownBetKeysRef = useRef(new Set());
+  // Is the host still reaching shared storage? A read counts only if it's
+  // fresh (not from a cache); a race update counts once it's confirmed saved.
+  // If neither has happened for a while, spectators are seeing an old race
+  // and the host is told.
+  const syncOkAtRef = useRef(Date.now());
+  const syncWriteSinceRef = useRef(null); // when the oldest unconfirmed race update was sent
+  const resendSnapshotRef = useRef(null); // the latest race update, if it didn't get through
+  const [syncTrouble, setSyncTrouble] = useState(false);
 
   // Deletes every shared key under a prefix — best effort, fire-and-forget.
   // Used to sweep spectator bet records and stale snapshots that would
@@ -1734,6 +1742,27 @@ export default function App() {
         })
       : [];
 
+  // Sends the race snapshot. If it doesn't get through, it's sent again on the
+  // next bet check (every 4s), so spectators catch up once the signal's back
+  // even if nothing else changes.
+  const snapshotSeqRef = useRef(0);
+  const sendSnapshot = (token, json) => {
+    const seq = ++snapshotSeqRef.current;
+    if (syncWriteSinceRef.current == null) syncWriteSinceRef.current = Date.now();
+    resendSnapshotRef.current = null;
+    window.storage
+      .set(`race:${token}`, json, true)
+      .then(() => {
+        if (seq !== snapshotSeqRef.current) return; // a newer one is on its way
+        syncWriteSinceRef.current = null;
+        syncOkAtRef.current = Date.now();
+      })
+      .catch(() => {
+        // Only the latest is worth sending again.
+        if (seq === snapshotSeqRef.current) resendSnapshotRef.current = { token, json };
+      });
+  };
+
   // Broadcast a read-only race snapshot for spectators, whenever their
   // betting session is on and anything relevant changes.
   useEffect(() => {
@@ -1759,7 +1788,7 @@ export default function App() {
       runnerUpName: runnerUp ? runnerUp.name : null,
       updatedAt: Date.now(),
     };
-    window.storage.set(`race:${sessionToken}`, JSON.stringify(snapshot), true).catch(() => {});
+    sendSnapshot(sessionToken, JSON.stringify(snapshot));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [specEnabled, sessionToken, raceId, status, trackLength, trackName, racers, odds, finishOrder, bankrolls]);
 
@@ -1767,9 +1796,17 @@ export default function App() {
   useEffect(() => {
     if (!specEnabled || !sessionToken) return;
     let cancelled = false;
+    const checkSync = () => {
+      const now = Date.now();
+      const since = syncWriteSinceRef.current;
+      setSyncTrouble(now - syncOkAtRef.current > SYNC_TROUBLE_MS || (since != null && now - since > SYNC_TROUBLE_MS));
+    };
     const poll = async () => {
+      const resend = resendSnapshotRef.current;
+      if (resend && resend.token === sessionToken) sendSnapshot(resend.token, resend.json);
       try {
         const listRes = await window.storage.list(`bet:${sessionToken}:${raceId}:`, true);
+        if (listRes && !listRes.stale) syncOkAtRef.current = Date.now();
         const keys = (listRes && listRes.keys) || [];
         const newKeys = keys.filter((k) => !knownBetKeysRef.current.has(k));
         if (newKeys.length === 0) return;
@@ -1791,13 +1828,17 @@ export default function App() {
         });
       } catch (e) {
         // best effort — try again next tick
+      } finally {
+        if (!cancelled) checkSync();
       }
     };
+    syncOkAtRef.current = Date.now();
     poll();
     const interval = setInterval(poll, 4000);
     return () => {
       cancelled = true;
       clearInterval(interval);
+      setSyncTrouble(false);
     };
   }, [specEnabled, sessionToken, raceId]);
 
@@ -2256,6 +2297,17 @@ export default function App() {
         {mode === "host" && !showChampion && (
           <>
             <TabBar tab={tab} setTab={setTab} status={status} />
+
+            {specEnabled && syncTrouble && (
+              <div
+                role="status"
+                className="mb-3 px-3 py-2 rounded-lg text-sm font-semibold"
+                style={{ background: "var(--yellow)", color: "var(--ink)", border: "2px solid var(--ink)" }}
+              >
+                Spectators can't see updates right now. Check this phone's internet — they'll catch up by
+                themselves once it's back.
+              </div>
+            )}
 
             {status === "racing" && pendingEffect && racers.some((r) => r.id === pendingEffect.racerId) && (
               <SpaceEffectPrompt
@@ -3366,6 +3418,9 @@ function ModeChooser({ onHost, onJoin, historyIndex = [], resume = null, leaving
 const SPECTATOR_SESSION_KEY = "spectator-session"; // { pin, token, name, savedAt }
 const SPECTATOR_BETS_KEY = "spectator-bets"; // { token, raceId, bets }
 const SPECTATOR_RESUME_MS = 12 * 60 * 60 * 1000; // same as a join code's lifetime
+// How long shared storage can go unreachable before anyone is told: a spectator
+// sees "Reconnecting…", the host a warning that spectators can't see updates.
+const SYNC_TROUBLE_MS = 12000;
 
 async function loadSpectatorSession() {
   try {
@@ -3534,7 +3589,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
         if (!cancelled) setOffline(false);
       } catch (e) {
         // try again next tick; after a while, tell the person we're reconnecting
-        if (!cancelled && Date.now() - lastOkRef.current > 12000) setOffline(true);
+        if (!cancelled && Date.now() - lastOkRef.current > SYNC_TROUBLE_MS) setOffline(true);
       }
       try {
         const s = await window.storage.get(`join:${joinedPin}`, true);
