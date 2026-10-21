@@ -27,7 +27,7 @@ writeFileSync(file, out.outputFiles[0].text);
 const app = await import(pathToFileURL(file).href);
 rmSync(dir, { recursive: true, force: true });
 
-const { betPayout, placeOddsFor } = app;
+const { betPayout, placeOddsFor, nameKey, spectatorBetProblem, betValue } = app;
 
 test("place odds sit between 1x and the win odds", () => {
   assert.equal(placeOddsFor(0), 0);
@@ -60,4 +60,25 @@ test("bet payouts", () => {
   assert.equal(betPayout(place("egg"), odds, "hare", undefined), 0);
   assert.equal(betPayout(win("mystery"), odds, "mystery", "egg"), 0);
   assert.equal(betPayout(null, odds, "hare", "egg"), 0);
+});
+
+test("names match ignoring case and spaces", () => {
+  assert.equal(nameKey("  Mary  "), "mary");
+  assert.equal(nameKey("Mary   B"), "mary b");
+  assert.equal(nameKey(undefined), "");
+});
+
+test("a spectator's bet under another phone's name is turned down", () => {
+  const names = { mary: "phone1" };
+  assert.equal(spectatorBetProblem({ bettorName: "mary", bettorId: "phone1" }, names), null);
+  assert.equal(spectatorBetProblem({ bettorName: "MARY ", bettorId: "phone2" }, names), "name");
+  assert.equal(spectatorBetProblem({ bettorName: "Mary B", bettorId: "phone2" }, names), null);
+  // Bets with no phone id (typed on the host, or an older app) aren't checked.
+  assert.equal(spectatorBetProblem({ bettorName: "Mary" }, names), null);
+});
+
+test("a bet is always stored the same way, so a retry is an exact overwrite", () => {
+  const b = { id: "b1", raceId: "r1", bettorName: "Mary", bettorId: "p1", racerId: "hare", amount: 10, betType: "win", state: "sending" };
+  assert.equal(betValue(b), betValue({ ...b, state: "placed" }));
+  assert.deepEqual(JSON.parse(betValue(b)), { id: "b1", bettorName: "Mary", bettorId: "p1", racerId: "hare", amount: 10, betType: "win" });
 });

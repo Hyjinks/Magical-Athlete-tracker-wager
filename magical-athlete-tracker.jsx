@@ -909,6 +909,12 @@ export default function App() {
   // Running spectator bankrolls: each bettor's cumulative net across races,
   // applied once per race when the result is saved.
   const [bankrolls, setBankrolls] = useState({});
+  // Which spectator phone has which name, for the whole game: the first phone
+  // to bet as "Mary" keeps it, so two Marys can't share one bankroll.
+  // { [nameKey]: spectator phone id }. Names typed on the host phone aren't in it.
+  const [spectatorNames, setSpectatorNames] = useState({});
+  const spectatorNamesRef = useRef(spectatorNames);
+  spectatorNamesRef.current = spectatorNames;
   const [odds, setOdds] = useState({}); // racerId -> fixed decimal odds, set by the "bookie"
 
   // bet form
@@ -968,6 +974,7 @@ export default function App() {
         if (typeof s.sessionPin === "string" || s.sessionPin === null) {
           setSessionPin(s.sessionPin);
         }
+        if (s.spectatorNames && typeof s.spectatorNames === "object") setSpectatorNames(s.spectatorNames);
         // Deliberately NOT switching to host mode here. The saved game is loaded
         // into state, but the landing screen waits for a tap and offers
         // "Continue your game" — jumping straight in made the first screen
@@ -1021,6 +1028,7 @@ export default function App() {
       specEnabled,
       sessionToken,
       sessionPin,
+      spectatorNames,
     };
     const serialized = JSON.stringify(snapshot);
     if (serialized === lastSnapshotRef.current) return;
@@ -1709,6 +1717,7 @@ export default function App() {
     setLastRacePoints(null);
     setBronzePoints({});
     setBankrolls({});
+    setSpectatorNames({});
     setRacers([emptyRacer(0), emptyRacer(1)]);
     setTab("setup");
   };
@@ -1784,13 +1793,14 @@ export default function App() {
       odds,
       finishOrder,
       bankrolls,
+      takenNames: spectatorNames,
       winnerName: winner ? winner.name : null,
       runnerUpName: runnerUp ? runnerUp.name : null,
       updatedAt: Date.now(),
     };
     sendSnapshot(sessionToken, JSON.stringify(snapshot));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [specEnabled, sessionToken, raceId, status, trackLength, trackName, racers, odds, finishOrder, bankrolls]);
+  }, [specEnabled, sessionToken, raceId, status, trackLength, trackName, racers, odds, finishOrder, bankrolls, spectatorNames]);
 
   // Poll for bets spectators placed on their own devices and merge them in.
   useEffect(() => {
@@ -1811,15 +1821,35 @@ export default function App() {
         const newKeys = keys.filter((k) => !knownBetKeysRef.current.has(k));
         if (newKeys.length === 0) return;
         const fetched = [];
+        const names = { ...spectatorNamesRef.current };
+        let namesChanged = false;
         for (const k of newKeys) {
+          let bet;
           try {
             const res = await window.storage.get(k, true);
-            if (res) fetched.push(JSON.parse(res.value));
+            if (res) bet = JSON.parse(res.value);
           } catch (e) {
             // skip a bad record
           }
+          if (!bet) continue;
+          const reason = spectatorBetProblem(bet, names);
+          if (reason) {
+            // Turned down: removed from shared storage, and the spectator's
+            // phone notices it's gone and says why.
+            window.storage.delete(k, true).catch(() => {});
+            continue;
+          }
+          if (bet.bettorId && !names[nameKey(bet.bettorName)]) {
+            names[nameKey(bet.bettorName)] = bet.bettorId;
+            namesChanged = true;
+          }
+          fetched.push(bet);
         }
         newKeys.forEach((k) => knownBetKeysRef.current.add(k));
+        if (namesChanged && !cancelled) {
+          spectatorNamesRef.current = names;
+          setSpectatorNames(names);
+        }
         if (cancelled || fetched.length === 0) return;
         setBets((prev) => {
           const existingIds = new Set(prev.map((b) => b.id));
@@ -3422,6 +3452,22 @@ const SPECTATOR_RESUME_MS = 12 * 60 * 60 * 1000; // same as a join code's lifeti
 // sees "Reconnecting…", the host a warning that spectators can't see updates.
 const SYNC_TROUBLE_MS = 12000;
 
+// A random id for this phone, kept for good, so the host can tell two
+// spectators with the same name apart. (The smoke test sets
+// window.__MA_SPECTATOR_ID__ to play two phones in one browser.)
+async function spectatorPhoneId() {
+  if (typeof window !== "undefined" && window.__MA_SPECTATOR_ID__) return String(window.__MA_SPECTATOR_ID__);
+  try {
+    const res = await window.storage.get("spectator-id", false);
+    if (res && /^[A-Za-z0-9]{1,40}$/.test(res.value)) return res.value;
+  } catch (e) {
+    // make a new one
+  }
+  const id = uid();
+  window.storage.set("spectator-id", id, false).catch(() => {});
+  return id;
+}
+
 async function loadSpectatorSession() {
   try {
     const res = await window.storage.get(SPECTATOR_SESSION_KEY, false);
@@ -3437,7 +3483,27 @@ async function loadSpectatorSession() {
 // What's stored for a bet. Always the same for the same bet, so sending it
 // again is an exact overwrite (firestore.rules relies on that).
 export function betValue(b) {
-  return JSON.stringify({ id: b.id, bettorName: b.bettorName, racerId: b.racerId, amount: b.amount, betType: b.betType });
+  return JSON.stringify({
+    id: b.id,
+    bettorName: b.bettorName,
+    bettorId: b.bettorId,
+    racerId: b.racerId,
+    amount: b.amount,
+    betType: b.betType,
+  });
+}
+
+// Names are compared ignoring case and extra spaces: "mary " is "Mary".
+export function nameKey(name) {
+  return String(name || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+// Why the host turns down a bet from a spectator's phone, or null if it's
+// fine. `names` maps name keys to the phone that has that name.
+export function spectatorBetProblem(bet, names) {
+  const owner = names[nameKey(bet.bettorName)];
+  if (bet.bettorId && owner && owner !== bet.bettorId) return "name";
+  return null;
 }
 
 function SpectatorView({ onLeave, initialPin = "" }) {
@@ -3463,6 +3529,10 @@ function SpectatorView({ onLeave, initialPin = "" }) {
   const restoredBetsRef = useRef(null); // { token, raceId, bets } saved on this phone
   const sendingRef = useRef(new Set()); // ids of bets with a save in flight
   const [rejoining, setRejoining] = useState(true); // checking for a game to go back to
+  const phoneIdRef = useRef(null);
+  const missingRef = useRef(new Map()); // placed bet id -> checks in a row it was missing
+  const sessionActiveRef = useRef(true);
+  sessionActiveRef.current = sessionActive;
 
   const [betRacer, setBetRacer] = useState("");
   const [betAmount, setBetAmount] = useState("");
@@ -3486,6 +3556,20 @@ function SpectatorView({ onLeave, initialPin = "" }) {
       const s = JSON.parse(res.value);
       if (!s.active || !s.token) {
         return fail("That game isn't taking spectators right now. Ask the host to turn spectator betting on.");
+      }
+      if (!phoneIdRef.current) phoneIdRef.current = await spectatorPhoneId();
+      // Is this name already another phone's in this game?
+      try {
+        const r = await window.storage.get(`race:${s.token}`, true);
+        const taken = r ? (JSON.parse(r.value) || {}).takenNames : null;
+        const owner = taken && taken[nameKey(name)];
+        if (owner && owner !== phoneIdRef.current) {
+          return fail(
+            `Someone called ${name} has already joined this game. Add your surname or an initial, like "${name} B".`
+          );
+        }
+      } catch (e) {
+        // can't tell yet — the host checks again when a bet arrives
       }
       let restored = null;
       try {
@@ -3669,6 +3753,57 @@ function SpectatorView({ onLeave, initialPin = "" }) {
     return () => clearInterval(interval);
   }, [joined, token, hasSending]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A placed bet that later disappears from storage was turned down or removed
+  // by the host. It has to be missing twice in a row, with a fresh race
+  // snapshot, before the spectator is told (a new race clears old bets too).
+  useEffect(() => {
+    if (!joined || !token) return;
+    const check = async () => {
+      const snap = snapshotRef.current;
+      if (!snap || !sessionActiveRef.current || Date.now() - lastOkRef.current > 6000) return;
+      for (const b of myBetsRef.current) {
+        if (b.state !== "placed" || b.raceId !== snap.raceId) continue;
+        let r;
+        try {
+          r = await window.storage.get(betKey(b), true);
+        } catch (e) {
+          continue;
+        }
+        if (r) {
+          missingRef.current.delete(b.id);
+          continue;
+        }
+        const misses = (missingRef.current.get(b.id) || 0) + 1;
+        missingRef.current.set(b.id, misses);
+        if (misses < 2) continue;
+        const owner = snap.takenNames && snap.takenNames[nameKey(b.bettorName)];
+        const reason = owner && owner !== b.bettorId ? "name" : snap.status !== "setup" ? "closed" : "removed";
+        markBet(b.id, { state: "rejected", reason });
+      }
+    };
+    const interval = setInterval(check, 5000);
+    return () => clearInterval(interval);
+  }, [joined, token]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Back to the join form, code kept, to pick a name nobody else has.
+  const changeName = () => {
+    window.storage.delete(SPECTATOR_SESSION_KEY, false).catch(() => {});
+    window.storage.delete(SPECTATOR_BETS_KEY, false).catch(() => {});
+    lastRaceIdRef.current = null;
+    snapshotRef.current = null;
+    restoredBetsRef.current = null;
+    missingRef.current = new Map();
+    setMyBets([]);
+    setSnapshot(null);
+    setBetNote("");
+    setBetSending("");
+    setNameInput("");
+    setPinInput(joinedPin || pinInput);
+    setToken(null);
+    setJoined(false);
+  };
+  const nameClash = myBets.some((b) => b.state === "rejected" && b.reason === "name");
+
   // Once nothing is still sending, the "still sending" message goes.
   useEffect(() => {
     if (!hasSending) setBetSending("");
@@ -3681,6 +3816,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
       id: uid(),
       raceId: snapshot.raceId,
       bettorName: spectatorName,
+      bettorId: phoneIdRef.current,
       racerId: betRacer,
       amount: amt,
       betType,
@@ -3816,6 +3952,21 @@ function SpectatorView({ onLeave, initialPin = "" }) {
           <p role="status" className="text-lg font-semibold mt-2" style={{ color: "var(--red)" }}>
             Reconnecting… what you see may be a little out of date.
           </p>
+        )}
+        {nameClash && (
+          <div className="mt-2">
+            <p role="alert" className="text-lg font-semibold" style={{ color: "var(--red)" }}>
+              Someone else is already betting as {spectatorName}, so your bet wasn't accepted. Pick a different
+              name, like "{spectatorName} B".
+            </p>
+            <button
+              onClick={changeName}
+              className="mt-2 w-full py-3 rounded-lg text-lg font-bold"
+              style={{ background: "var(--purple)", color: "var(--paper2)", border: "2.5px solid var(--ink)" }}
+            >
+              Change my name
+            </button>
+          </div>
         )}
       </Card>
 

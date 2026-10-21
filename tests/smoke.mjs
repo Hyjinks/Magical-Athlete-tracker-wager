@@ -108,8 +108,20 @@ async function openApp({ serviceWorkers = "block", sharedBackend = "local", redu
 }
 
 // Another page in the same context (shares the device's storage).
-async function openPage(ctx, url, errors) {
+// `phone` gives the page its own spectator phone id, and starts it without
+// the previous page's saved spectator game — a second phone in the same browser.
+async function openPage(ctx, url, errors, { phone } = {}) {
   const page = await ctx.newPage();
+  if (phone) {
+    await page.addInitScript((id) => {
+      window.__MA_SPECTATOR_ID__ = id;
+      if (!sessionStorage.getItem("ma-test-started")) {
+        sessionStorage.setItem("ma-test-started", "1");
+        localStorage.removeItem("ma:spectator-session");
+        localStorage.removeItem("ma:spectator-bets");
+      }
+    }, phone);
+  }
   page.on("pageerror", (e) => errors.push(`page error: ${e.message}`));
   page.on("console", (m) => {
     if (m.type() === "error") errors.push(`console error: ${m.text()}`);
@@ -782,6 +794,63 @@ async function suite(target) {
     check(!/Spectators can't see updates/.test(await bodyText(host)), "the host's warning clears when the signal's back");
     await spec.waitForTimeout(4500);
     check(/The race is on/.test(await bodyText(spec)), "and the spectator catches up without the host doing anything");
+    check(errors.length === 0, `no errors${errors.length ? `: ${errors.join(" / ")}` : ""}`);
+    await ctx.close();
+  }
+
+  // ---------------------------------------------------------------------------
+  console.log("\nTwo spectators can't share a name");
+  {
+    const { ctx, page: host, errors } = await openApp();
+    const pin = await hostWithSpectators(host);
+    const joinUrl = `${PAGE_URL}${PAGE_URL.includes("?") ? "&" : "?"}join=${pin}`;
+    const joinAs = async (page, name) => {
+      await tap(page, /^Skip$/).catch(() => {});
+      await page.locator('input[placeholder="Your name"]').fill(name);
+      await tap(page, /^Join$/, 1500);
+      await tap(page, /^Got it$/).catch(() => {});
+    };
+    const bet = async (page, racer, amount) => {
+      await tap(page, new RegExp(`^${racer}`), 150);
+      await tap(page, new RegExp(`^${amount}$`), 150);
+      await tap(page, /^Place bet$/, 600);
+    };
+    // Two Marys join before either has bet: both get in
+    const mary1 = await openPage(ctx, joinUrl, errors, { phone: "phone1" });
+    await joinAs(mary1, "Mary");
+    const mary2 = await openPage(ctx, joinUrl, errors, { phone: "phone2" });
+    await joinAs(mary2, "mary ");
+    check(/Hey, mary/i.test(await bodyText(mary2)), "a second Mary can join before anyone has bet");
+
+    // The first to bet keeps the name; the second's bet is turned down
+    await bet(mary1, "Banana", 10);
+    await host.waitForTimeout(4800);
+    await bet(mary2, "Egg", 20);
+    await mary2.waitForTimeout(20000);
+    let text = await bodyText(mary2);
+    check(/Someone else is already betting as mary/i.test(text), "the second Mary is told her bet wasn't accepted, and why");
+    const hostBets = await host.evaluate(() =>
+      Object.keys(localStorage).filter((k) => k.startsWith("ma-s:bet:")).map((k) => JSON.parse(localStorage.getItem(k)).bettorId)
+    );
+    check(hostBets.length === 1 && hostBets[0] === "phone1", `only the first Mary's bet is kept (${hostBets.join(", ")})`);
+
+    // She picks another name and bets again
+    await tap(mary2, /^Change my name$/, 600);
+    check((await mary2.locator('input[placeholder="Your name"]').count()) === 1, "Change my name goes back to the join form");
+    await joinAs(mary2, "Mary");
+    check(/already joined this game/.test(await bodyText(mary2)), "joining as a name another phone has is stopped at the door");
+    await joinAs(mary2, "Mary B");
+    await bet(mary2, "Egg", 20);
+    await host.waitForTimeout(4800);
+    const names = await host.evaluate(() =>
+      Object.keys(localStorage).filter((k) => k.startsWith("ma-s:bet:")).map((k) => JSON.parse(localStorage.getItem(k)).bettorName).sort()
+    );
+    check(names.join("|") === "Mary|Mary B", `both bets are in, under different names (${names.join(", ")})`);
+
+    // The same phone joining again as Mary is welcome
+    const again = await openPage(ctx, joinUrl, errors, { phone: "phone1" });
+    await joinAs(again, "Mary");
+    check(/Hey, Mary/.test(await bodyText(again)), "the first Mary's own phone can join as Mary again");
     check(errors.length === 0, `no errors${errors.length ? `: ${errors.join(" / ")}` : ""}`);
     await ctx.close();
   }
