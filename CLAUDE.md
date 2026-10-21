@@ -37,7 +37,10 @@ Mobile-first: it's used on phones at the table.
    `-top` and `-bottom` of each).
    Google Fonts are stubbed in the test, so headings show a fallback font there.
 4. Publish `dist/magical-athlete.html` with the Artifact tool, passing the URL above
-   so it updates in place (a new URL would lose people's saved games).
+   so it updates in place (a new URL would lose people's saved games). The
+   artifact declares one capability, `downloads` (Back up saves through it);
+   leave `capabilities` out when republishing so it's kept — passing a
+   different set replaces it.
 5. Commit and push to `main` (`git fetch origin main && git rebase origin/main` first).
    That also redeploys the web app automatically; check the run succeeded.
 6. For anything about feel — animations, timing, layout on a real phone — tell Adam

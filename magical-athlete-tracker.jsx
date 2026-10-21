@@ -7986,9 +7986,23 @@ export function planRestore(backup, existing, existingSettings = {}) {
   return { index: kept, writes, deletes, settings, added: writes.length, alreadyHere: backup.races.length - incoming.size };
 }
 
-// Hands the file to the phone's share sheet where there is one (Save to
-// Files, email…), otherwise downloads it.
+// Hands the file over: inside claude.ai through the viewer's own save prompt
+// (the artifact can't download by itself), else the phone's share sheet where
+// there is one (Save to Files, email…), else a plain download.
 async function deliverBackupFile(json, filename) {
+  const host = typeof window !== "undefined" ? window.claude : null;
+  if (host && typeof host.use === "function") {
+    const downloads = await host.use("downloads").catch(() => null);
+    if (downloads) {
+      try {
+        await downloads.save({ filename, data: json });
+        return "saved";
+      } catch (e) {
+        if (e && e.code === "declined") return "cancelled";
+        throw e;
+      }
+    }
+  }
   const blob = new Blob([json], { type: "application/json" });
   try {
     const file = new File([blob], filename, { type: "application/json" });
