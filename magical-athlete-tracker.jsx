@@ -82,9 +82,24 @@ function rollDice(excludeDoubles = false) {
 // no second roll needed. Compresses the win multiplier toward 1x, since
 // placing is always an easier bet to win than winning outright, so it always
 // pays out less than the win odds for the same racer.
-function placeOddsFor(winOdds) {
+export function placeOddsFor(winOdds) {
   if (!winOdds) return 0;
   return Math.round((1 + (winOdds - 1) * 0.4) * 20) / 20;
+}
+
+// What one bet pays back, stake included, once the race is decided: a win bet
+// on the winner pays the win odds, a place bet on either of the top two pays
+// the place odds, anything else pays 0. The host's settlement and the
+// spectator's own "You won" line both use this, so they can't disagree.
+export function betPayout(bet, odds, winnerId, runnerUpId) {
+  if (!bet || !winnerId) return 0;
+  const isWin = (bet.betType || "win") === "win";
+  const hit = isWin
+    ? bet.racerId === winnerId
+    : bet.racerId === winnerId || (runnerUpId != null && bet.racerId === runnerUpId);
+  if (!hit) return 0;
+  const winOdds = (odds && odds[bet.racerId]) || 0;
+  return bet.amount * (isWin ? winOdds : placeOddsFor(winOdds));
 }
 
 // Aggregates career stats from every saved race record — win rates, streaks,
@@ -1714,15 +1729,7 @@ export default function App() {
       ? [...new Set(bets.map((b) => b.bettorName))].map((name) => {
           const theirBets = bets.filter((b) => b.bettorName === name);
           const staked = theirBets.reduce((s, b) => s + b.amount, 0);
-          const won = theirBets.reduce((s, b) => {
-            const isWin = (b.betType || "win") === "win";
-            const hitWin = isWin && b.racerId === winnerId;
-            const hitPlace = !isWin && (b.racerId === winnerId || b.racerId === runnerUpId);
-            if (!hitWin && !hitPlace) return s;
-            const racerWinOdds = odds[b.racerId] || 0;
-            const payoutOdds = isWin ? racerWinOdds : placeOddsFor(racerWinOdds);
-            return s + b.amount * payoutOdds;
-          }, 0);
+          const won = theirBets.reduce((s, b) => s + betPayout(b, odds, winnerId, runnerUpId), 0);
           return { name, staked, payout: won, net: won - staked };
         })
       : [];
@@ -3528,15 +3535,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
   const myStaked = myBets.reduce((s, b) => s + b.amount, 0);
   const myPayout =
     snapshot.status === "finished"
-      ? myBets.reduce((s, b) => {
-          const isWin = (b.betType || "win") === "win";
-          const hitWin = isWin && b.racerId === winnerId;
-          const hitPlace = !isWin && (b.racerId === winnerId || b.racerId === runnerUpId);
-          if (!hitWin && !hitPlace) return s;
-          const racerWinOdds = snapOdds[b.racerId] || 0;
-          const payoutOdds = isWin ? racerWinOdds : placeOddsFor(racerWinOdds);
-          return s + b.amount * payoutOdds;
-        }, 0)
+      ? myBets.reduce((s, b) => s + betPayout(b, snapOdds, winnerId, runnerUpId), 0)
       : 0;
 
   return (
