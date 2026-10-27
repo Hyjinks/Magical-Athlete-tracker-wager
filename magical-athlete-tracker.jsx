@@ -3542,6 +3542,8 @@ function SpectatorView({ onLeave, initialPin = "" }) {
   const [pinInput, setPinInput] = useState(initialPin);
   const [nameInput, setNameInput] = useState("");
   const [joinError, setJoinError] = useState("");
+  // Arrived by link or QR with a code: ask only for a name, until the code turns out wrong.
+  const [codeFromLink, setCodeFromLink] = useState(() => /^\d{4}$/.test(initialPin));
   const [token, setToken] = useState(null);
   const [joinedPin, setJoinedPin] = useState(null);
   const [spectatorName, setSpectatorName] = useState("");
@@ -3582,7 +3584,10 @@ function SpectatorView({ onLeave, initialPin = "" }) {
     };
     try {
       const res = await window.storage.get(`join:${pin}`, true);
-      if (!res) return fail("There's no game with that code. Double-check it with the host.");
+      if (!res) {
+        setCodeFromLink(false); // show the code field so it can be corrected
+        return fail("There's no game with that code. Double-check it with the host.");
+      }
       const s = JSON.parse(res.value);
       if (!s.active || !s.token) {
         return fail("That game isn't taking spectators right now. Ask the host to turn spectator betting on.");
@@ -3896,26 +3901,50 @@ function SpectatorView({ onLeave, initialPin = "" }) {
     return (
       <Card>
         <SectionTitle icon={Coins}>Join as a spectator</SectionTitle>
-        <p className="text-base mb-3" style={{ color: "var(--muted)" }}>
-          Get the 4-digit code from whoever's hosting.
-        </p>
-        <input
-          value={nameInput}
-          onChange={(e) => setNameInput(e.target.value)}
-          placeholder="Your name"
-          maxLength={40}
-          className="w-full mb-2 px-3 py-2 rounded-lg border"
-          style={{ borderColor: "var(--ink)", background: "var(--paper)" }}
-        />
-        <input
-          value={pinInput}
-          onChange={(e) => setPinInput(e.target.value.replace(/\D/g, "").slice(0, 4))}
-          onKeyDown={(e) => e.key === "Enter" && join()}
-          placeholder="4-digit code"
-          inputMode="numeric"
-          className="w-full mb-2 px-3 py-2 rounded-lg border font-mono text-center text-lg tracking-widest"
-          style={{ borderColor: "var(--ink)", background: "var(--paper)" }}
-        />
+        {codeFromLink ? (
+          <>
+            <p className="text-xl font-bold mb-3" style={{ color: "var(--ink)" }}>
+              You're joining game {pinInput}
+            </p>
+            <label htmlFor="ma-spectator-name" className="block text-lg mb-1" style={{ color: "var(--muted)" }}>
+              What's your name?
+            </label>
+            <input
+              id="ma-spectator-name"
+              value={nameInput}
+              onChange={(e) => setNameInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && join()}
+              placeholder="Your name"
+              maxLength={40}
+              autoComplete="given-name"
+              className="w-full mb-3 px-4 py-3 rounded-lg border text-2xl"
+              style={{ borderColor: "var(--ink)", background: "var(--paper)" }}
+            />
+          </>
+        ) : (
+          <>
+            <p className="text-base mb-3" style={{ color: "var(--muted)" }}>
+              Get the 4-digit code from whoever's hosting.
+            </p>
+            <input
+              value={nameInput}
+              onChange={(e) => setNameInput(e.target.value)}
+              placeholder="Your name"
+              maxLength={40}
+              className="w-full mb-2 px-3 py-2 rounded-lg border"
+              style={{ borderColor: "var(--ink)", background: "var(--paper)" }}
+            />
+            <input
+              value={pinInput}
+              onChange={(e) => setPinInput(e.target.value.replace(/\D/g, "").slice(0, 4))}
+              onKeyDown={(e) => e.key === "Enter" && join()}
+              placeholder="4-digit code"
+              inputMode="numeric"
+              className="w-full mb-2 px-3 py-2 rounded-lg border font-mono text-center text-lg tracking-widest"
+              style={{ borderColor: "var(--ink)", background: "var(--paper)" }}
+            />
+          </>
+        )}
         {joinError && (
           <p className="text-base mb-2" style={{ color: "var(--red)" }}>
             {joinError}

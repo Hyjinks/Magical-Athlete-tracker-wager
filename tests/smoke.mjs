@@ -64,7 +64,7 @@ const check = (ok, msg) => {
 
 rmSync(SHOTS_ROOT, { recursive: true, force: true });
 
-const browser = await chromium.launch();
+const browser = await chromium.launch(process.env.PW_EXE ? { executablePath: process.env.PW_EXE } : {});
 
 // A fresh phone-sized page with no saved data. Google Fonts are stubbed so the
 // test runs offline without a network error in the console.
@@ -575,6 +575,12 @@ async function suite(target) {
     // A wrong code is turned away with a plain message
     const spec = await openPage(ctx, `${PAGE_URL}${PAGE_URL.includes("?") ? "&" : "?"}join=${pin === "1234" ? "4321" : "1234"}`, errors);
     await tap(spec, /^Skip$/).catch(() => {});
+    check(
+      (await spec.locator('input[placeholder="4-digit code"]').count()) === 0 && /joining game/i.test(await bodyText(spec)),
+      "a link with a code asks only for a name",
+    );
+    const nameFont = await spec.locator('input[placeholder="Your name"]').evaluate((e) => parseFloat(getComputedStyle(e).fontSize));
+    check(nameFont >= 24, "the name field on a joining link is large");
     await spec.locator('input[placeholder="Your name"]').fill("Gran");
     await tap(spec, /^Join$/, 600);
     check(/no game with that code/i.test(await bodyText(spec)), "a wrong code says there's no game with that code");
@@ -623,10 +629,9 @@ async function suite(target) {
       const b = [...document.querySelectorAll("button[aria-label^='Join code']")][0];
       return b ? b.innerText.replace(/\D/g, "").slice(0, 4) : null;
     });
-    const spec = await openPage(ctx, `${PAGE_URL}${PAGE_URL.includes("?") ? "&" : "?"}join=${pin === "1234" ? "4321" : "1234"}`, errors);
+    const spec = await openPage(ctx, `${PAGE_URL}${PAGE_URL.includes("?") ? "&" : "?"}join=${pin}`, errors);
     await tap(spec, /^Skip$/).catch(() => {});
     await spec.locator('input[placeholder="Your name"]').fill("Gran");
-    await spec.locator('input[placeholder="4-digit code"]').fill(pin);
     await tap(spec, /^Join$/, 1500);
     await tap(spec, /^Got it$/).catch(() => {});
     check(/Track: Wild Wilds/.test(await bodyText(spec)), "spectator sees which track is being raced");
