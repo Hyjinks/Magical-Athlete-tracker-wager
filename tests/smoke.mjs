@@ -591,6 +591,30 @@ async function suite(target) {
     await tap(spec, /^Got it$/).catch(() => {});
     await tap(spec, /^Banana/, 150);
     await tap(spec, /^10$/, 150);
+    check(
+      /You're betting 10 on Banana to win\. If Banana finishes 1st, you get [\d.,]+ back\./.test(await bodyText(spec)),
+      "before betting, the spectator is told in plain words what they're betting and what it pays",
+    );
+    // Large, easy screen for older eyes: no text under 16px, nothing small to tap
+    const small = await spec.evaluate(() => {
+      const bad = [];
+      for (const el of document.querySelectorAll("div.rounded-2xl.border-4 *")) {
+        const r = el.getBoundingClientRect();
+        if (!r.width || !r.height || getComputedStyle(el).visibility === "hidden") continue;
+        const hasText = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+        if (hasText && parseFloat(getComputedStyle(el).fontSize) < 16) bad.push(el.textContent.trim().slice(0, 30));
+      }
+      return bad;
+    });
+    check(small.length === 0, `spectator screen has no text under 16px${small.length ? ": " + small.slice(0, 5).join(" | ") : ""}`);
+    const tiny = await spec.evaluate(() =>
+      [...document.querySelectorAll("button")]
+        .filter((b) => b.getBoundingClientRect().width && !b.disabled)
+        .filter((b) => b.getBoundingClientRect().height < 48 || b.getBoundingClientRect().width < 48)
+        .map((b) => (b.innerText || b.getAttribute("aria-label") || "").trim().slice(0, 20)),
+    );
+    check(tiny.length === 0, `spectator buttons are all at least 48px${tiny.length ? ": " + tiny.join(" | ") : ""}`);
+    await spec.screenshot({ path: join(SHOTS, "spectator-bet-form.png"), fullPage: true });
     await tap(spec, /^Place bet$/, 600);
     check(/Your bets/i.test(await bodyText(spec)), "spectator's bet shows on their phone");
     await spec.screenshot({ path: join(SHOTS, "spectator-bet.png") });

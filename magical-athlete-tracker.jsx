@@ -16,6 +16,8 @@ import {
   Dices,
   Download,
   Upload,
+  Check,
+  WifiOff,
 } from "lucide-react";
 import qrcode from "qrcode-generator";
 
@@ -2544,21 +2546,21 @@ function useOnboarding() {
   return { seen: seen || {}, dismiss, loaded: seen !== null };
 }
 
-function OnboardingBanner({ id, seen, dismiss, children }) {
+function OnboardingBanner({ id, seen, dismiss, children, large = false }) {
   if (seen[id]) return null;
   return (
     <div
       className="rounded-lg p-3 mb-3 flex items-start gap-2"
       style={{ background: "var(--highlight)", border: "2px solid var(--ink)" }}
     >
-      <span style={{ fontSize: 16, lineHeight: 1 }}>💡</span>
+      <span style={{ fontSize: large ? 26 : 16, lineHeight: 1 }}>💡</span>
       <div className="flex-1">
-        <p className="text-xs" style={{ color: "var(--ink)" }}>
+        <p className={large ? "text-xl" : "text-xs"} style={{ color: "var(--ink)" }}>
           {children}
         </p>
         <button
           onClick={() => dismiss(id)}
-          className="mt-1.5 text-xs font-mono font-semibold underline"
+          className={`mt-1.5 font-mono font-semibold underline ${large ? "text-xl" : "text-xs"}`}
           style={{ color: "var(--red)" }}
         >
           Got it
@@ -3536,6 +3538,24 @@ export function spectatorBetProblem(bet, names, { open = true, odds = null } = {
 // this is the backstop for other storage.)
 export const LATE_BET_GRACE_MS = 8000;
 
+// A numbered heading for one step of placing a bet.
+function SpecStep({ n, children }) {
+  return (
+    <div className="flex items-center gap-3 mb-2 mt-6 first:mt-0">
+      <span
+        aria-hidden="true"
+        className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-2xl shrink-0"
+        style={{ background: "var(--ink)", color: "var(--paper2)" }}
+      >
+        {n}
+      </span>
+      <h3 className="font-display font-bold text-2xl" style={{ color: "var(--ink)" }}>
+        {children}
+      </h3>
+    </div>
+  );
+}
+
 function SpectatorView({ onLeave, initialPin = "" }) {
   const { seen: onboardingSeen, dismiss: dismissOnboarding } = useOnboarding();
   const [joined, setJoined] = useState(false);
@@ -3574,6 +3594,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
   const [betSending, setBetSending] = useState("");
   const [offline, setOffline] = useState(false);
   const lastOkRef = useRef(Date.now());
+  useWakeLock(joined); // a phone that falls asleep mid-race goes quiet
 
   // Checks the code and enters the game. `quiet` is for going back to a saved
   // game: if it has ended, the join form just shows, with no error.
@@ -3890,7 +3911,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
   if (!joined && rejoining) {
     return (
       <Card>
-        <p className="text-lg text-center py-6" style={{ color: "var(--muted)" }}>
+        <p className="text-2xl font-bold text-center py-8" style={{ color: "var(--muted)" }}>
           Rejoining the race…
         </p>
       </Card>
@@ -3903,10 +3924,10 @@ function SpectatorView({ onLeave, initialPin = "" }) {
         <SectionTitle icon={Coins}>Join as a spectator</SectionTitle>
         {codeFromLink ? (
           <>
-            <p className="text-xl font-bold mb-3" style={{ color: "var(--ink)" }}>
+            <p className="text-2xl font-bold mb-4" style={{ color: "var(--ink)" }}>
               You're joining game {pinInput}
             </p>
-            <label htmlFor="ma-spectator-name" className="block text-lg mb-1" style={{ color: "var(--muted)" }}>
+            <label htmlFor="ma-spectator-name" className="block text-xl mb-2" style={{ color: "var(--muted)" }}>
               What's your name?
             </label>
             <input
@@ -3917,13 +3938,13 @@ function SpectatorView({ onLeave, initialPin = "" }) {
               placeholder="Your name"
               maxLength={40}
               autoComplete="given-name"
-              className="w-full mb-3 px-4 py-3 rounded-lg border text-2xl"
-              style={{ borderColor: "var(--ink)", background: "var(--paper)" }}
+              className="w-full mb-4 px-4 py-3 rounded-xl border-4 text-2xl"
+              style={{ borderColor: "var(--ink)", background: "var(--paper)", minHeight: 64 }}
             />
           </>
         ) : (
           <>
-            <p className="text-base mb-3" style={{ color: "var(--muted)" }}>
+            <p className="text-xl mb-4" style={{ color: "var(--muted)" }}>
               Get the 4-digit code from whoever's hosting.
             </p>
             <input
@@ -3931,33 +3952,35 @@ function SpectatorView({ onLeave, initialPin = "" }) {
               onChange={(e) => setNameInput(e.target.value)}
               placeholder="Your name"
               maxLength={40}
-              className="w-full mb-2 px-3 py-2 rounded-lg border"
-              style={{ borderColor: "var(--ink)", background: "var(--paper)" }}
+              aria-label="Your name"
+              className="w-full mb-3 px-4 py-3 rounded-xl border-4 text-2xl"
+              style={{ borderColor: "var(--ink)", background: "var(--paper)", minHeight: 64 }}
             />
             <input
               value={pinInput}
               onChange={(e) => setPinInput(e.target.value.replace(/\D/g, "").slice(0, 4))}
               onKeyDown={(e) => e.key === "Enter" && join()}
               placeholder="4-digit code"
+              aria-label="4-digit code"
               inputMode="numeric"
-              className="w-full mb-2 px-3 py-2 rounded-lg border font-mono text-center text-lg tracking-widest"
-              style={{ borderColor: "var(--ink)", background: "var(--paper)" }}
+              className="w-full mb-3 px-4 py-3 rounded-xl border-4 font-mono text-center text-3xl tracking-widest"
+              style={{ borderColor: "var(--ink)", background: "var(--paper)", minHeight: 64 }}
             />
           </>
         )}
         {joinError && (
-          <p className="text-base mb-2" style={{ color: "var(--red)" }}>
+          <p role="alert" className="text-xl font-semibold mb-3" style={{ color: "var(--red)" }}>
             {joinError}
           </p>
         )}
         <button
           onClick={join}
-          className="w-full py-3 rounded-lg text-lg font-bold mb-2"
-          style={{ background: "var(--red)", color: "var(--paper2)", border: "2.5px solid var(--ink)" }}
+          className="w-full py-4 rounded-xl text-2xl font-bold mb-2"
+          style={{ background: "var(--red)", color: "var(--paper2)", border: "3px solid var(--ink)", minHeight: 64 }}
         >
           Join
         </button>
-        <button onClick={onLeave} className="w-full py-2 text-base" style={{ color: "var(--muted)" }}>
+        <button onClick={onLeave} className="w-full py-3 text-xl" style={{ color: "var(--muted)" }}>
           ← Back
         </button>
       </Card>
@@ -3967,7 +3990,7 @@ function SpectatorView({ onLeave, initialPin = "" }) {
   if (!snapshot) {
     return (
       <Card>
-        <p className="text-lg text-center py-6" style={{ color: "var(--muted)" }}>
+        <p className="text-2xl font-bold text-center py-8" style={{ color: "var(--muted)" }}>
           Connecting to the race…
         </p>
       </Card>
@@ -3992,51 +4015,86 @@ function SpectatorView({ onLeave, initialPin = "" }) {
     snapshot.status === "finished"
       ? placedBets.reduce((s, b) => s + betPayout(b, snapOdds, winnerId, runnerUpId), 0)
       : 0;
+  const myNet = myPayout - myStaked;
+
+  // The big coloured banner at the top says, in one plain sentence, what is
+  // happening now. Colour is a bonus: the words carry the meaning.
+  const banner = !sessionActive
+    ? { bg: "var(--ink)", fg: "var(--paper2)", title: "Host closed betting.", detail: "Ask the host if there's another game." }
+    : snapshot.status === "setup"
+    ? { bg: "var(--green)", fg: "var(--paper2)", title: "Betting open", detail: "Pick a racer and an amount below." }
+    : snapshot.status === "racing"
+    ? { bg: "var(--purple)", fg: "var(--paper2)", title: "The race is on!", detail: "Positions update by themselves." }
+    : {
+        bg: "var(--yellow)",
+        fg: "var(--ink)",
+        title: "The race is finished.",
+        detail:
+          placedBets.length === 0
+            ? "Thanks for watching!"
+            : myNet > 0
+            ? `You won ${myNet.toFixed(2)}!`
+            : myNet < 0
+            ? `You lost ${(-myNet).toFixed(2)}.`
+            : "You broke even.",
+      };
+
+  // What the bet being built would be, in words.
+  const chosen = snapRacers.find((r) => r.id === betRacer);
+  const chosenWinOdds = chosen && snapOdds[chosen.id] ? snapOdds[chosen.id] : 0;
+  const chosenOdds = chosenWinOdds ? (betType === "win" ? chosenWinOdds : placeOddsFor(chosenWinOdds)) : 0;
+  const amtNum = parseFloat(betAmount);
+  const canBet = !!chosen && chosenOdds > 0 && amtNum > 0;
+  const money = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
   return (
     <div>
-      <OnboardingBanner id="spectatorJoin" seen={onboardingSeen} dismiss={dismissOnboarding}>
+      <OnboardingBanner id="spectatorJoin" seen={onboardingSeen} dismiss={dismissOnboarding} large>
         You're in! Odds and standings update automatically every few seconds — no need to refresh.
         Place bets below whenever they're open.
       </OnboardingBanner>
 
       <Card>
-        <div className="flex items-center justify-between">
-          <p className="font-display font-bold text-2xl" style={{ color: "var(--ink)" }}>
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <p className="font-display font-bold text-3xl truncate" style={{ color: "var(--ink)" }}>
             Hey, {spectatorName}
           </p>
-          <button onClick={leave} className="text-base" style={{ color: "var(--muted)" }}>
+          <button
+            onClick={leave}
+            className="px-4 rounded-xl text-lg font-semibold shrink-0"
+            style={{ color: "var(--ink)", border: "2.5px solid var(--ink)", background: "var(--paper)", minHeight: 48 }}
+          >
             Leave
           </button>
         </div>
-        <p className="text-xl font-bold mt-1" style={{ color: "var(--ink)" }}>
-          {!sessionActive
-            ? "Host closed betting."
-            : snapshot.status === "setup"
-            ? "Betting open — pick a racer and an amount below."
-            : snapshot.status === "racing"
-            ? "The race is on! Positions update by themselves."
-            : placedBets.length === 0
-            ? "The race is finished."
-            : myPayout - myStaked >= 0
-            ? `The race is finished. You won ${(myPayout - myStaked).toFixed(2)}!`
-            : `The race is finished. You lost ${(myStaked - myPayout).toFixed(2)}.`}
-        </p>
+        <div
+          role="status"
+          className="rounded-xl p-4"
+          style={{ background: banner.bg, color: banner.fg, border: "3px solid var(--ink)" }}
+        >
+          <p className="font-display font-bold text-3xl leading-tight">{banner.title}</p>
+          <p className="text-xl font-semibold mt-1">{banner.detail}</p>
+        </div>
         {offline && (
-          <p role="status" className="text-lg font-semibold mt-2" style={{ color: "var(--red)" }}>
-            Reconnecting… what you see may be a little out of date.
-          </p>
+          <div
+            role="status"
+            className="flex items-center gap-3 rounded-xl p-3 mt-3"
+            style={{ background: "var(--red)", color: "var(--paper2)", border: "3px solid var(--ink)" }}
+          >
+            <WifiOff size={28} aria-hidden="true" className="shrink-0" />
+            <p className="text-xl font-bold">Reconnecting… what you see may be a little out of date.</p>
+          </div>
         )}
         {nameClash && (
-          <div className="mt-2">
-            <p role="alert" className="text-lg font-semibold" style={{ color: "var(--red)" }}>
+          <div className="mt-3">
+            <p role="alert" className="text-xl font-semibold" style={{ color: "var(--red)" }}>
               Someone else is already betting as {spectatorName}, so your bet wasn't accepted. Pick a different
               name, like "{spectatorName} B".
             </p>
             <button
               onClick={changeName}
-              className="mt-2 w-full py-3 rounded-lg text-lg font-bold"
-              style={{ background: "var(--purple)", color: "var(--paper2)", border: "2.5px solid var(--ink)" }}
+              className="mt-3 w-full py-3 rounded-xl text-xl font-bold"
+              style={{ background: "var(--purple)", color: "var(--paper2)", border: "3px solid var(--ink)", minHeight: 60 }}
             >
               Change my name
             </button>
@@ -4044,66 +4102,330 @@ function SpectatorView({ onLeave, initialPin = "" }) {
         )}
       </Card>
 
+      {bettingOpen && Object.keys(snapOdds).length > 0 && (
+        <Card>
+          <SectionTitle icon={Plus} large>
+            Place a bet
+          </SectionTitle>
+
+          <SpecStep n={1}>Pick a racer</SpecStep>
+          <div className="space-y-2" role="group" aria-label="Pick a racer">
+            {snapRacers.map((r) => {
+              const hasOdds = !!snapOdds[r.id];
+              const shownOdds = hasOdds ? (betType === "win" ? snapOdds[r.id] : placeOddsFor(snapOdds[r.id])) : null;
+              const selected = betRacer === r.id;
+              return (
+                <button
+                  key={r.id}
+                  onClick={() => hasOdds && setBetRacer(r.id)}
+                  disabled={!hasOdds}
+                  aria-pressed={selected}
+                  className="w-full flex items-center gap-3 px-4 rounded-xl text-left disabled:opacity-40"
+                  style={{
+                    minHeight: 68,
+                    background: selected ? "var(--green)" : "var(--paper)",
+                    color: selected ? "var(--paper2)" : "var(--ink)",
+                    border: "3px solid var(--ink)",
+                    boxShadow: selected ? "inset 0 0 0 3px var(--paper2)" : "none",
+                  }}
+                >
+                  <span
+                    aria-hidden="true"
+                    className="w-7 h-7 rounded-full shrink-0"
+                    style={{ background: r.color, border: "3px solid var(--ink)" }}
+                  />
+                  <span className="flex-1 min-w-0 truncate text-2xl font-bold">{r.name}</span>
+                  <span className="font-mono text-2xl font-bold shrink-0">
+                    {shownOdds ? `×${shownOdds.toFixed(2)}` : "posting…"}
+                  </span>
+                  {selected && <Check size={28} strokeWidth={3} aria-hidden="true" className="shrink-0" />}
+                </button>
+              );
+            })}
+          </div>
+
+          <SpecStep n={2}>Win or place?</SpecStep>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              ["win", "Win (1st only)"],
+              ["place", "Place (top 2)"],
+            ].map(([id, label]) => {
+              const on = betType === id;
+              return (
+                <button
+                  key={id}
+                  onClick={() => setBetType(id)}
+                  aria-pressed={on}
+                  className="px-2 rounded-xl text-xl font-bold"
+                  style={{
+                    minHeight: 68,
+                    background: on ? "var(--purple)" : "var(--paper)",
+                    color: on ? "var(--paper2)" : "var(--ink)",
+                    border: "3px solid var(--ink)",
+                    boxShadow: on ? "inset 0 0 0 3px var(--paper2)" : "none",
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-lg mt-2" style={{ color: "var(--muted)" }}>
+            {betType === "win"
+              ? "Win pays only if your racer finishes 1st, and pays the most."
+              : "Place pays if your racer finishes 1st or 2nd, but pays less."}
+          </p>
+
+          <SpecStep n={3}>How much?</SpecStep>
+          <div className="grid grid-cols-4 gap-2">
+            {[5, 10, 20, 50].map((n) => {
+              const on = betAmount === String(n);
+              return (
+                <button
+                  key={n}
+                  onClick={() => setBetAmount(String(n))}
+                  aria-pressed={on}
+                  className="rounded-xl text-2xl font-mono font-bold"
+                  style={{
+                    minHeight: 64,
+                    background: on ? "var(--yellow)" : "var(--paper)",
+                    color: "var(--ink)",
+                    border: "3px solid var(--ink)",
+                    boxShadow: on ? "inset 0 0 0 3px var(--paper2)" : "none",
+                  }}
+                >
+                  {n}
+                </button>
+              );
+            })}
+          </div>
+          <input
+            type="number"
+            min="0"
+            step="0.5"
+            inputMode="decimal"
+            value={betAmount}
+            onChange={(e) => setBetAmount(e.target.value)}
+            placeholder="custom"
+            aria-label="Or type your own amount"
+            className="w-full mt-2 px-4 rounded-xl border-4 text-2xl font-mono"
+            style={{ borderColor: "var(--ink)", background: "var(--paper)", minHeight: 64 }}
+          />
+
+          <div
+            aria-live="polite"
+            className="rounded-xl p-4 mt-5"
+            style={{ background: canBet ? "var(--highlight)" : "var(--paper)", border: "3px dashed var(--ink)" }}
+          >
+            {canBet ? (
+              <>
+                <p className="text-2xl font-bold leading-snug" style={{ color: "var(--ink)" }}>
+                  You're betting {money(amtNum)} on {chosen.name} to {betType === "win" ? "win" : "place"}.
+                </p>
+                <p className="text-xl mt-1" style={{ color: "var(--ink)" }}>
+                  If {chosen.name} finishes {betType === "win" ? "1st" : "1st or 2nd"}, you get{" "}
+                  <strong>{(amtNum * chosenOdds).toFixed(2)}</strong> back.
+                </p>
+              </>
+            ) : (
+              <p className="text-xl" style={{ color: "var(--muted)" }}>
+                {!chosen ? "Pick a racer to start." : "Now pick how much to bet."}
+              </p>
+            )}
+          </div>
+
+          <button
+            onClick={placeBet}
+            disabled={!canBet}
+            className="w-full mt-3 rounded-xl text-2xl font-bold disabled:opacity-40"
+            style={{ background: "var(--red)", color: "var(--paper2)", border: "3px solid var(--ink)", minHeight: 68 }}
+          >
+            Place bet
+          </button>
+          {betError && (
+            <p role="alert" className="text-xl font-semibold mt-3" style={{ color: "var(--red)" }}>
+              {betError}
+            </p>
+          )}
+          {betNote && (
+            <div
+              role="status"
+              className="flex items-start gap-3 rounded-xl p-4 mt-3"
+              style={{ background: "var(--green)", color: "var(--paper2)", border: "3px solid var(--ink)" }}
+            >
+              <Check size={30} strokeWidth={3} aria-hidden="true" className="shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xl font-bold">{betNote}</p>
+                <p className="text-lg mt-1">You'll find it under Your bets.</p>
+              </div>
+            </div>
+          )}
+          {betSending && (
+            <p role="status" className="text-xl font-semibold mt-3" style={{ color: "var(--ink)" }}>
+              {betSending}
+            </p>
+          )}
+        </Card>
+      )}
+
+      {myBets.length > 0 && (
+        <Card>
+          <SectionTitle icon={Clock} large>
+            Your bets
+          </SectionTitle>
+          <div className="space-y-2">
+            {myBets.map((b) => {
+              const racer = snapRacers.find((r) => r.id === b.racerId);
+              const isWin = (b.betType || "win") === "win";
+              const racerWinOdds = snapOdds[b.racerId] || 0;
+              const applicableOdds = isWin ? racerWinOdds : placeOddsFor(racerWinOdds);
+              return (
+                <div
+                  key={b.id}
+                  className="rounded-xl p-3"
+                  style={{ background: "var(--paper)", border: "2.5px solid var(--ink)" }}
+                >
+                  <div style={b.state === "rejected" ? { opacity: 0.55, textDecoration: "line-through" } : undefined}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-2xl font-bold truncate">{racer?.name}</span>
+                      <span
+                        className="font-mono text-base font-bold px-2 py-0.5 rounded shrink-0"
+                        style={{
+                          background: isWin ? "var(--highlight)" : "var(--paper2)",
+                          border: "2px solid var(--ink)",
+                        }}
+                      >
+                        {isWin ? "WIN" : "PLACE"}
+                      </span>
+                    </div>
+                    <p className="font-mono text-xl mt-0.5">
+                      {b.amount.toFixed(2)} @ ×{applicableOdds.toFixed(2)}
+                    </p>
+                  </div>
+                  {b.state === "sending" && (
+                    <p className="text-lg font-semibold mt-1" style={{ color: "var(--muted)" }}>
+                      Sending…
+                    </p>
+                  )}
+                  {b.state === "rejected" && (
+                    <p className="text-lg font-bold mt-1" style={{ color: "var(--red)" }}>
+                      {b.reason === "removed"
+                        ? "Removed by the host."
+                        : b.reason === "name"
+                        ? "Not accepted: someone else is already betting under this name."
+                        : "Not accepted: betting had closed before it got through."}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {snapshot.status === "finished" && (
+            <div className="mt-3 pt-3" style={{ borderTop: "2px solid var(--ink)" }}>
+              <p
+                className="font-mono text-2xl font-bold"
+                style={{ color: myNet >= 0 ? "var(--green)" : "var(--red)" }}
+              >
+                {myNet >= 0 ? "+" : ""}
+                {myNet.toFixed(2)} net
+              </p>
+            </div>
+          )}
+        </Card>
+      )}
+
       <Card>
-        <SectionTitle icon={Flag}>Who's winning</SectionTitle>
+        <SectionTitle icon={Flag} large>
+          Who's winning
+        </SectionTitle>
         {snapshot.trackName && (
-          <p className="font-mono text-base mb-2" style={{ color: "var(--muted)" }}>
+          <p className="font-mono text-lg mb-3" style={{ color: "var(--muted)" }}>
             Track: {snapshot.trackName === "wild" ? "Wild Wilds" : "Mild Mile"}
           </p>
         )}
-        <div className="space-y-1.5">
-          {sortedRacers.map((r, i) => (
-            <div key={r.id} className="flex items-center gap-2 text-lg">
-              <span className="font-mono text-base w-4 text-center" style={{ color: "var(--red)" }}>
-                {i + 1}
-              </span>
-              <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: r.color }} />
-              <span className="flex-1 truncate">{r.name}</span>
-              {r.tripped && !r.finished && snapshot.status === "racing" && (
-                <span
-                  className="font-mono text-base px-1.5 py-0.5 rounded"
-                  style={{ background: "var(--ink)", color: "var(--paper2)" }}
+        <div className="space-y-3">
+          {sortedRacers.map((r, i) => {
+            const pct = snapshot.trackLength > 0 ? Math.max(0, Math.min(100, (r.position / snapshot.trackLength) * 100)) : 0;
+            return (
+              <div key={r.id}>
+                <div className="flex items-center gap-3">
+                  <span
+                    aria-hidden="true"
+                    className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-xl shrink-0"
+                    style={{ background: "var(--ink)", color: "var(--paper2)" }}
+                  >
+                    {i + 1}
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className="w-5 h-5 rounded-full shrink-0"
+                    style={{ background: r.color, border: "2.5px solid var(--ink)" }}
+                  />
+                  <span className="flex-1 min-w-0 truncate text-2xl font-bold">{r.name}</span>
+                  {r.tripped && !r.finished && snapshot.status === "racing" && (
+                    <span
+                      className="font-mono text-base font-bold px-2 py-0.5 rounded shrink-0"
+                      style={{ background: "var(--ink)", color: "var(--paper2)" }}
+                    >
+                      Tripped
+                    </span>
+                  )}
+                  {r.finished && (
+                    <span
+                      className="font-mono text-lg font-bold px-2 py-0.5 rounded shrink-0"
+                      style={{ background: "var(--yellow)", color: "var(--ink)", border: "2px solid var(--ink)" }}
+                    >
+                      {winnerId === r.id ? "1st" : "2nd"}
+                    </span>
+                  )}
+                  <span className="font-mono text-xl font-semibold shrink-0" style={{ color: "var(--muted)" }}>
+                    {r.position}/{snapshot.trackLength}
+                  </span>
+                </div>
+                <div
+                  aria-hidden="true"
+                  className="mt-1.5 h-3 rounded-full overflow-hidden"
+                  style={{ background: "var(--paper)", border: "2px solid var(--ink)" }}
                 >
-                  Tripped
-                </span>
-              )}
-              {r.finished && (
-                <span
-                  className="font-mono text-base px-1.5 py-0.5 rounded"
-                  style={{ background: "var(--yellow)", color: "var(--ink)" }}
-                >
-                  {winnerId === r.id ? "1st" : "2nd"}
-                </span>
-              )}
-              <span className="font-mono text-base" style={{ color: "var(--muted)" }}>
-                {r.position}/{snapshot.trackLength}
-              </span>
-            </div>
-          ))}
+                  <div
+                    className="h-full"
+                    style={{ width: `${pct}%`, background: r.color, transition: "width 600ms ease-out" }}
+                  />
+                </div>
+              </div>
+            );
+          })}
         </div>
       </Card>
 
       {Object.keys(snapBank).length > 0 && (
         <Card>
-          <SectionTitle icon={Trophy}>Leaderboard</SectionTitle>
-          <p className="text-base mb-2" style={{ color: "var(--muted)" }}>
+          <SectionTitle icon={Trophy} large>
+            Leaderboard
+          </SectionTitle>
+          <p className="text-lg mb-3" style={{ color: "var(--muted)" }}>
             Everyone's winnings so far, after each saved race.
           </p>
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             {snapBankList.map(([name, total], i) => {
               const me = name === spectatorName;
               return (
                 <div
                   key={name}
-                  className="flex items-center justify-between text-lg px-2 py-1.5 rounded"
-                  style={{ background: me ? "var(--yellow)" : "var(--paper)", color: "var(--ink)" }}
+                  className="flex items-center justify-between gap-2 text-xl px-3 rounded-xl"
+                  style={{
+                    background: me ? "var(--yellow)" : "var(--paper)",
+                    color: "var(--ink)",
+                    minHeight: 56,
+                    border: "2px solid var(--ink)",
+                  }}
                 >
-                  <span className="truncate">
+                  <span className="truncate font-semibold">
                     {i + 1}. {name}
                     {me ? " (you)" : ""}
                   </span>
                   <span
-                    className="font-mono font-semibold shrink-0"
+                    className="font-mono font-bold shrink-0"
                     style={{ color: total >= 0 ? "var(--green)" : "var(--red)" }}
                   >
                     {total >= 0 ? "+" : ""}
@@ -4116,212 +4438,50 @@ function SpectatorView({ onLeave, initialPin = "" }) {
         </Card>
       )}
 
-      <Card>
-        <SectionTitle icon={Coins}>Odds</SectionTitle>
-        <div className="flex items-center justify-between px-2 mb-1">
-          <span className="font-mono text-base" style={{ color: "var(--muted)" }}>
-            Racer
-          </span>
-          <div className="flex gap-3">
-            <span className="font-mono text-base w-20 text-right" style={{ color: "var(--muted)" }}>
-              Win
+      {!bettingOpen && snapRacers.length > 0 && (
+        <Card>
+          <SectionTitle icon={Coins} large>
+            Odds
+          </SectionTitle>
+          <div className="flex items-center justify-between px-3 mb-1">
+            <span className="font-mono text-lg" style={{ color: "var(--muted)" }}>
+              Racer
             </span>
-            <span className="font-mono text-base w-20 text-right" style={{ color: "var(--muted)" }}>
-              Place
-            </span>
-          </div>
-        </div>
-        <div className="space-y-1.5">
-          {snapRacers.map((r) => (
-            <div
-              key={r.id}
-              className="flex items-center justify-between text-lg px-2 py-1.5 rounded"
-              style={{ background: "var(--paper)" }}
-            >
-              <span className="flex items-center gap-2 min-w-0">
-                <span className="w-2.5 h-2.5 rounded-full inline-block shrink-0" style={{ background: r.color }} />
-                <span className="truncate">{r.name}</span>
+            <div className="flex gap-3">
+              <span className="font-mono text-lg w-24 text-right" style={{ color: "var(--muted)" }}>
+                Win
               </span>
-              <div className="flex gap-3 shrink-0">
-                <span className="font-mono text-lg font-semibold w-20 text-right" style={{ color: "var(--red)" }}>
-                  {snapOdds[r.id] ? `×${snapOdds[r.id].toFixed(2)}` : "—"}
+              <span className="font-mono text-lg w-24 text-right" style={{ color: "var(--muted)" }}>
+                Place
+              </span>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {snapRacers.map((r) => (
+              <div
+                key={r.id}
+                className="flex items-center justify-between text-xl px-3 rounded-xl"
+                style={{ background: "var(--paper)", minHeight: 56 }}
+              >
+                <span className="flex items-center gap-2 min-w-0">
+                  <span
+                    aria-hidden="true"
+                    className="w-5 h-5 rounded-full shrink-0"
+                    style={{ background: r.color, border: "2.5px solid var(--ink)" }}
+                  />
+                  <span className="truncate font-semibold">{r.name}</span>
                 </span>
-                <span className="font-mono text-lg w-20 text-right" style={{ color: "var(--muted)" }}>
-                  {snapOdds[r.id] ? `×${placeOddsFor(snapOdds[r.id]).toFixed(2)}` : "—"}
-                </span>
+                <div className="flex gap-3 shrink-0">
+                  <span className="font-mono text-xl font-bold w-24 text-right" style={{ color: "var(--red)" }}>
+                    {snapOdds[r.id] ? `×${snapOdds[r.id].toFixed(2)}` : "—"}
+                  </span>
+                  <span className="font-mono text-xl w-24 text-right" style={{ color: "var(--muted)" }}>
+                    {snapOdds[r.id] ? `×${placeOddsFor(snapOdds[r.id]).toFixed(2)}` : "—"}
+                  </span>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      {bettingOpen && Object.keys(snapOdds).length > 0 && (
-        <Card>
-          <SectionTitle icon={Plus}>Place a bet</SectionTitle>
-          <OnboardingBanner id="betType" seen={onboardingSeen} dismiss={dismissOnboarding}>
-            Win only pays if your racer finishes 1st. Place pays if they finish 1st or 2nd, at a
-            lower rate.
-          </OnboardingBanner>
-          <p className="text-base font-mono uppercase mb-1.5" style={{ color: "var(--muted)" }}>
-            Win or place?
-          </p>
-          <div className="flex gap-1.5 mb-3">
-            {[
-              ["win", "Win (1st only)"],
-              ["place", "Place (top 2)"],
-            ].map(([id, label]) => (
-              <button
-                key={id}
-                onClick={() => setBetType(id)}
-                className="flex-1 px-3 py-2 rounded-full text-lg font-medium border-2"
-                style={{
-                  background: betType === id ? "var(--purple)" : "var(--paper)",
-                  color: betType === id ? "var(--paper2)" : "var(--ink)",
-                  borderColor: betType === id ? "var(--purple)" : "var(--ink)",
-                }}
-              >
-                {label}
-              </button>
             ))}
           </div>
-          <div className="flex flex-wrap gap-1.5 mb-3">
-            {snapRacers.map((r) => {
-              const hasOdds = !!snapOdds[r.id];
-              const shownOdds = hasOdds ? (betType === "win" ? snapOdds[r.id] : placeOddsFor(snapOdds[r.id])) : null;
-              return (
-                <button
-                  key={r.id}
-                  onClick={() => hasOdds && setBetRacer(r.id)}
-                  disabled={!hasOdds}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-full text-lg font-medium border-2 disabled:opacity-40"
-                  style={{
-                    background: betRacer === r.id ? "var(--green)" : "var(--paper)",
-                    color: betRacer === r.id ? "var(--paper2)" : "var(--ink)",
-                    borderColor: betRacer === r.id ? "var(--green)" : "var(--ink)",
-                  }}
-                >
-                  <span className="w-2 h-2 rounded-full inline-block" style={{ background: r.color }} />
-                  {r.name}
-                  <span className="font-mono text-base opacity-80">
-                    {shownOdds ? `×${shownOdds.toFixed(2)}` : "posting…"}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-          <div className="flex flex-wrap gap-1.5 mb-2">
-            {[5, 10, 20, 50].map((n) => (
-              <button
-                key={n}
-                onClick={() => setBetAmount(String(n))}
-                className="px-3 py-2 rounded-lg text-lg font-mono font-semibold border-2"
-                style={{
-                  background: betAmount === String(n) ? "var(--yellow)" : "var(--paper)",
-                  borderColor: betAmount === String(n) ? "var(--yellow)" : "var(--ink)",
-                  color: "var(--ink)",
-                }}
-              >
-                {n}
-              </button>
-            ))}
-            <input
-              type="number"
-              min="0"
-              step="0.5"
-              value={betAmount}
-              onChange={(e) => setBetAmount(e.target.value)}
-              placeholder="custom"
-              className="flex-1 px-2 py-2 rounded-lg border"
-              style={{ borderColor: "var(--ink)", background: "var(--paper)", minWidth: 80 }}
-            />
-          </div>
-          <button
-            onClick={placeBet}
-            disabled={!betRacer || !betAmount}
-            className="w-full py-3 rounded-lg text-lg font-bold disabled:opacity-40"
-            style={{ background: "var(--red)", color: "var(--paper2)", border: "2.5px solid var(--ink)" }}
-          >
-            Place bet
-          </button>
-          {betError && (
-            <p role="alert" className="text-lg mt-2" style={{ color: "var(--red)" }}>
-              {betError}
-            </p>
-          )}
-          {betNote && (
-            <p role="status" className="text-lg font-semibold mt-2" style={{ color: "var(--green)" }}>
-              {betNote}
-            </p>
-          )}
-          {betSending && (
-            <p role="status" className="text-lg font-semibold mt-2" style={{ color: "var(--ink)" }}>
-              {betSending}
-            </p>
-          )}
-        </Card>
-      )}
-
-      {myBets.length > 0 && (
-        <Card>
-          <SectionTitle icon={Clock}>Your bets</SectionTitle>
-          <div className="space-y-1">
-            {myBets.map((b) => {
-              const racer = snapRacers.find((r) => r.id === b.racerId);
-              const isWin = (b.betType || "win") === "win";
-              const racerWinOdds = snapOdds[b.racerId] || 0;
-              const applicableOdds = isWin ? racerWinOdds : placeOddsFor(racerWinOdds);
-              return (
-                <div key={b.id} className="px-2 py-1">
-                <div
-                  className="flex items-center justify-between text-base"
-                  style={b.state === "rejected" ? { opacity: 0.55, textDecoration: "line-through" } : undefined}
-                >
-                  <span className="flex items-center gap-1.5">
-                    {racer?.name}
-                    <span
-                      className="font-mono px-1 rounded"
-                      style={{
-                        background: isWin ? "var(--highlight)" : "var(--paper2)",
-                        border: "1px solid var(--ink)",
-                        fontSize: "14px",
-                      }}
-                    >
-                      {isWin ? "WIN" : "PLACE"}
-                    </span>
-                  </span>
-                  <span className="font-mono">
-                    {b.amount.toFixed(2)} @ ×{applicableOdds.toFixed(2)}
-                  </span>
-                </div>
-                {b.state === "sending" && (
-                  <p className="text-base" style={{ color: "var(--muted)" }}>
-                    Sending…
-                  </p>
-                )}
-                {b.state === "rejected" && (
-                  <p className="text-base font-semibold" style={{ color: "var(--red)" }}>
-                    {b.reason === "removed"
-                      ? "Removed by the host."
-                      : b.reason === "name"
-                      ? "Not accepted: someone else is already betting under this name."
-                      : "Not accepted: betting had closed before it got through."}
-                  </p>
-                )}
-                </div>
-              );
-            })}
-          </div>
-          {snapshot.status === "finished" && (
-            <div className="mt-2 pt-2" style={{ borderTop: "1.5px solid var(--ink)" }}>
-              <p
-                className="font-mono text-lg font-semibold"
-                style={{ color: myPayout - myStaked >= 0 ? "var(--green)" : "var(--red)" }}
-              >
-                {myPayout - myStaked >= 0 ? "+" : ""}
-                {(myPayout - myStaked).toFixed(2)} net
-              </p>
-            </div>
-          )}
         </Card>
       )}
     </div>
@@ -4433,11 +4593,11 @@ function Card({ children, className = "" }) {
   );
 }
 
-function SectionTitle({ children, icon: Icon }) {
+function SectionTitle({ children, icon: Icon, large = false }) {
   return (
     <div className="flex items-center gap-2 mb-3">
-      {Icon && <Icon size={16} color="var(--red)" />}
-      <h2 className="font-display font-bold text-lg" style={{ color: "var(--ink)" }}>
+      {Icon && <Icon size={large ? 26 : 16} color="var(--red)" aria-hidden="true" />}
+      <h2 className={`font-display font-bold ${large ? "text-3xl" : "text-lg"}`} style={{ color: "var(--ink)" }}>
         {children}
       </h2>
     </div>
